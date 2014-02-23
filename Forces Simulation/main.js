@@ -1,19 +1,29 @@
-var BML = false; // true to use handmapped bml vs false for using natural language and rules
+var BML = false;
+var USE_FORCES = true;
+var HUMAN = "GRAVEDIGGER1";
+var ACCURACY = .1;
 // to switch between BML and natural language processing
-var useforces = true; // whether to use forces or not
-var humanchar = 'HAMLET'; // who is the human controlled character
-var accuracy = .5; // percent accuracy of human character per the playscript
-
-
-var forces = require('./forces');
 var server = require('./server');
+var forces = require('./forces');
 var fs = require('fs');
+var traceback = require('./node_modules/traceback/traceback');
 //var eyes = require('eyes');
 var xml2js = require('xml2js');
 var natural = require('natural');
 var wordnet = new natural.WordNet('.');
 var tokenizer = new natural.WordTokenizer();
 var verbInflector = new natural.PresentVerbInflector();
+
+var honstagenomvmt = 0;
+var charintarcharcharnomvmt = 0;
+var addchartarget = 0;
+var charonstagenomvmt = 0;
+var randomcounter = 0;
+
+var MAXXVAL = 1059;
+var MAXYVAL = 916;
+var MAXXCONVERTED = (-2 * MAXXVAL) + 2312;
+var MAXYCONVERTED = (2 * MAXYVAL) + 209;
 
 var INTERVAL_ID = null;
 var framerate = 1000 / 60;
@@ -23,6 +33,8 @@ var pawns = null;
 var allObjects = null;
 var WAITINGON = new Array();
 var WAITING = false;
+var FORCEWAIT = new Array();
+var FORCEWAITING = false;
 var inputFileName = "InputFile.txt";
 var inputFile = null;
 var ALLDATA = new Array();
@@ -34,11 +46,9 @@ var numcalls = 0;
 var mvmtlines = null;
 var mytype = null;
 var myctr = null;
-var fulld = new Date();
-var fulllog = fs.createWriteStream('logs/full'+(BML?'BML':'NLPForces')+'log'+(fulld.getMonth() + 1 ) + "." + fulld.getDate() + "." + fulld.getFullYear() + " " + fulld.getHours() + "." + fulld.getMinutes() + "." + fulld.getSeconds() +'.csv', {
-			'flags' : 'a'
-		});
-		fulllog.write('time,minx,maxx,miny,maxy,G1x,G1y,G2x,G2y,HAx,HAy,HOx,HOy\n');
+
+var QUEUED = new Array();
+var QUEUEDTEXT = new Array();
 
 var charprecedence = ["HAMLET", "GRAVEDIGGER1", "GRAVEDIGGER2", "HORATIO"];
 
@@ -47,7 +57,7 @@ var translatedlocationarray = ["CENTER", "GRAVE", "/BACK", "GRAVE", "SHOVEL", "L
 var chararray = ["HAMLET", "HORATIO", "GRAVEDIGGER1", "GRAVEDIGGER2", "HE", "SHE", "WHO", "HIS"];
 var translatedchararray = ["HAMLET", "HORATIO", "GRAVEDIGGER1", "GRAVEDIGGER2", "/CURRENT", "/CURRENT", "/CURRENT", "/CURRENT"];
 var lookarray = ["LOOK", "TURN", "FACE", "GAZE", "LOOKS", "TO"];
-var walkarray = ["WALK", "GO", "MOVE", "ENTER", "CROSS", "CROSSES", "STEP", "STEPS", "EXITS", "GOES", "BESIDE", "TO", "SITS", "ENTERS"];
+var walkarray = ["WALK", "GO", "MOVE", "ENTER", "CROSS", "CROSSES", "STEP", "STEPS", "EXITS", "GOES", "BESIDE", "TO", "SITS", "ENTERS", "STANDS"];
 var pointarray = ["POINT", "GESTURE"];
 var pickuparray = ["PICK", "PICKUP", "LIFT", "PICK-UP", "CARRY", "CARRYING", "CARRIES", "WITH", "HOLDS", "PICKS", "GIVES"];
 var putdownarray = ["PUT", "PLACE", "PUTDOWN", "PUT-DOWN", "SET", "TOSSES", "THROWS", "HANDS"];
@@ -59,19 +69,19 @@ onerror = endSimulation();
 
 (function() {
 	Array.prototype.allIndexOf = function(searchElement) {
-		if(this === null) {
+		if (this === null) {
 			return [-1];
 		}
 		var len = this.length, hasIndexOf = Array.prototype.indexOf, // you know, because of IE
 		i = (hasIndexOf) ? this.indexOf(searchElement) : 0, n, indx = 0, result = [];
-		if(len === 0 || i === -1) {
+		if (len === 0 || i === -1) {
 			return [-1];
 		}
-		if(hasIndexOf) {
+		if (hasIndexOf) {
 			// Array.indexOf does exist
-			for( n = 0; n <= len; n++) {
+			for ( n = 0; n <= len; n++) {
 				i = this.indexOf(searchElement, indx);
-				if(i !== -1) {
+				if (i !== -1) {
 					indx = i + 1;
 					result.push(i);
 				} else {
@@ -81,8 +91,8 @@ onerror = endSimulation();
 			return result;
 		} else {
 			// Array.indexOf doesn't exist
-			for( n = 0; n <= len; n++) {
-				if(this[n] === searchElement) {
+			for ( n = 0; n <= len; n++) {
+				if (this[n] === searchElement) {
 					result.push(n);
 				}
 			}
@@ -99,22 +109,22 @@ function endSimulation() {
 	// end the simulation so can start new
 	clearInterval(INTERVAL_ID);
 	//var highestTimeoutId = setTimeout("");
-	if(TIMEOUTS != null) {
-		for(var i = 0; i < TIMEOUTS.length; i++) {
+	if (TIMEOUTS != null) {
+		for (var i = 0; i < TIMEOUTS.length; i++) {
 			clearTimeout(TIMEOUTS[i]);
 		}
 	}
-	if(characters != null) {
-		for(var i = 0; i < characters.length; i++) {
-			if(characters[i].log != null) {
+	if (characters != null) {
+		for (var i = 0; i < characters.length; i++) {
+			if (characters[i].log != null) {
 				characters[i].log.close();
 			}
 		}
 	}
-	for(var j = 0; j < WAITINGON.length; j++) {
+	for (var j = 0; j < WAITINGON.length; j++) {
 		WAITINGON.splice(j, 1);
 	}
-	if(inputFile != null) {
+	if (inputFile != null) {
 		try {
 			inputFile.close();
 		} catch(e) {
@@ -158,7 +168,7 @@ function startGame() {
 	WAITINGON = new Array();
 	curLine = 0;
 	WAITING = false;
-	if(BML) {
+	if (BML) {
 		inputFileName = "InputFile.txt";
 	} else {
 		inputFileName = "InputScript.txt";
@@ -169,6 +179,7 @@ function startGame() {
 		'mode' : 0666,
 		'bufferSize' : 4 * 1024
 	});
+
 	forces.fstartGame();
 
 	/**
@@ -182,17 +193,12 @@ function startGame() {
 				msg = msg + "\t" + textBoxes.who + "\t" + textBoxes.text;
 				break;
 			case "CHAR":
-				if(obj.x != obj.xold || obj.y != obj.yold || obj.angle != obj.angleold || obj.pointTo != obj.pointToold || obj.pointAngle != obj.pointAngleold) {
+				if (obj.x != obj.xold || obj.y != obj.yold || obj.angle != obj.angleold || obj.pointTo != obj.pointToold || obj.pointAngle != obj.pointAngleold) {
 					msg = msg + "\t" + obj.name + "\t" + obj.x + "\t" + obj.y + "\t" + obj.angle + "\t" + ((obj.pointTo == null) ? ("null") : (( obj instanceof Pawn) ? (obj.name) : (obj))) + "\t" + obj.pointAngle;
-					if (obj.x != obj.xold || obj.y != obj.yold) {
-						//obj.fchar.x = obj.x;
-						//obj.fchar.y = obj.y;
-						//forces.createForceUpdMsg("CHAR",obj.fchar,"UPDATE");
-					}
 				}
 				break;
 			case "PAWN":
-				if(obj.x != obj.xold || obj.y != obj.yold || obj.showcolor != obj.showcolorold) {
+				if (obj.x != obj.xold || obj.y != obj.yold || obj.showcolor != obj.showcolorold) {
 					msg = msg + "\t" + obj.name + "\t" + obj.x + "\t" + obj.y + "\t" + obj.showcolor;
 				}
 				break;
@@ -201,23 +207,24 @@ function startGame() {
 				console.log("ERROR Creating upd msg");
 				break;
 		}
-		if(msg != type) {
+		if (msg != type) {
 			server.sendMsg(msg);
 		}
 		//return msg;
 	}
 
+	/* this one just reads the flat file that has bml & markers saying what to do */
 	function readyForNextMsg(msgnum) {
 
 		var toremove = WAITINGON.indexOf(msgnum);
-		if(toremove != -1) {
+		if (toremove != -1) {
 			WAITINGON.splice(toremove, 1);
 		}
-		if(WAITINGON.length == 0) {
+		if (WAITINGON.length == 0) {
 			//console.log("done waiting for msgnum="+msgnum);
 			WAITING = false;
 		}
-		if(!WAITING) {
+		if (!WAITING) {
 			//console.log("done waiting for all, moving on");
 			writeXYs();
 			nextLine();
@@ -225,56 +232,491 @@ function startGame() {
 		// do nothing if we're still waiting for other events to finish
 	}
 
+	/* #2 means going to use natural language to figure out next steps to do */
+
 	function readyForNextMsg2(msgnum) {
 		//console.log("Num calls="+numcalls+", msgnum="+msgnum);
-		//console.log("Removing msg#"+msgnum);
-		numcalls++;
+		console.log("Removing msg#" + msgnum);
+		//numcalls++;
 		var toremove = WAITINGON.indexOf(msgnum);
-		if(toremove != -1) {
+		if (toremove != -1) {
 			WAITINGON.splice(toremove, 1);
 		}
-		if(WAITINGON.length == 0) {
+		var mytext = "";
+		for (var i = 0; i < WAITINGON.length; i++) {
+			mytext = mytext + ", " + WAITINGON[i];
+		}
+		console.log("Left in list: " + mytext);
+		if (WAITINGON.length == 0) {
 			//console.log("done waiting for msgnum="+msgnum);
 			WAITING = false;
 		}
-		if(!WAITING) {
+		if (!WAITING) {
 			//console.log("done waiting for all, moving on");
-			//parseLine();
-			updAllChars();
+			// saved everything into QUEUED array, now need to calculate forces to adjust what to do
+			TIMEOUTS[TIMEOUTS.length] = setTimeout(function() {
+				if (!WAITING) {
+					console.log("READY TO EVALUATE FORCES!");
+					evaluateforces();
+				} // to avoid timing issues
+			}, 30);
+			//console.log("READY TO EVALUATE FORCES!");
+			//evaluateforces();
+			/*writeXYs();
+			 parseLine();*/
 		}
 		// do nothing if we're still waiting for other events to finish
 	}
-	
-	function readyForNextMsgForces(msgnum) {
-		console.log("done waiting for msgnum="+msgnum);
-		var toremove = FWAITINGON.indexOf(msgnum);
+
+	function doneWithForces(msgnum) {
+		var toremove = FORCEWAIT.indexOf(msgnum);
+		console.log("forces removing " + msgnum);
 		if (toremove != -1) {
-			FWAITINGON.splice(toremove, 1);
-			
+			FORCEWAIT.splice(toremove, 1);
 		}
-		if (FWAITINGON.length == 0) {
-			FWAITING = false;
-			
+		var mytext = "";
+		for (var i = 0; i < FORCEWAIT.length; i++) {
+			mytext = mytext + ", " + FORCEWAIT[i];
 		}
-		if (!FWAITING) {
-			forces.deleteAll();
-			writeXYs();
-			parseLine();
+		console.log("Left in forces: " + mytext);
+		if (FORCEWAIT.length == 0) {
+			FORCEWAITING = false;
+		}
+		if (!FORCEWAITING) {
+			TIMEOUTS[TIMEOUTS.length] = setTimeout(function() {
+				if (!FORCEWAITING) {
+					console.log("done waiting for forces");
+					QUEUEDTEXT = new Array();
+					QUEUED = new Array();
+					writeXYs();
+					parseLine();
+				}
+			}, 30);
+
+		}
+
+	}
+
+	function evaluateforces() {
+		// everything is in the QUEUED array - need to figure out who
+		// QUEUEDTEXT has actor:, motion:, target:, otherstep: {actor:, motion:, target:}  where target: could be object, array, or x:,y:
+		// motions include: locomotionTarget, pointAtPoint, pointAtTarget, pickup, putdown, makecharlook, locomotionPt, say
+
+		// only need to review the locomotionTarget & locomotionPt entries for determining if adding to forces AND if in forces what the target is for that char
+		// otherwise just verify current position for characters
+		var TEMPQUEUE = new Array();
+		var curcharname = "";
+		for (var m = 0; m < QUEUEDTEXT.length; m++) {
+			switch (QUEUEDTEXT[m].motion) {
+				case 'locomotionTarget':
+				case 'locomotionPt':
+					TEMPQUEUE[TEMPQUEUE.length] = QUEUEDTEXT[m];
+					break;
+				default:
+					break;
+			}
+		}
+		for (var i = 0; i < characters.length; i++) {
+			curcharname = characters[i].name;
+			console.log("checking char " + curcharname);
+			var inlist = false;
+			var whichitem = -1;
+			var actions = new Array();
+			for (var j = 0; j < TEMPQUEUE.length; j++) {
+				if (curcharname == TEMPQUEUE[j].actor.name) {// so only get the first one
+					if (!inlist) {
+						inlist = true;
+						whichitem = j;
+					}
+					actions[actions.length] = TEMPQUEUE[j].motion;
+				}
+			}
+			if (curcharname == HUMAN) {
+				console.log("Is human");
+				// for the human char - if slated to move in the queuedtext, then do this first:
+				var myrand = Math.random();
+				if (inlist && myrand >= ACCURACY && TEMPQUEUE[whichitem].motion == "locomotionPt") {
+					// if this is the human, then do full movement if > accuracy, else do 50% of movement
+					//var myrand = Math.random();
+					//if (myrand >= ACCURACY) {
+					// change my x & y!!
+					randomcounter++;
+					var myrandx = Math.random();
+					var myrandy = Math.random();
+					// change my x & y!!
+					var x = MAXXVAL * myrandx;
+					var y = MAXYVAL * myrandy;
+					//x = MAXXCONVERTED*myrandx;
+					//y = MAXYCONVERTED*myrandy;
+					/*x = -1 * (x - 2312) / 2;
+					// clean up point values
+					y = (y - 209) / 2;
+					x = (x+this.x)/2;
+					y = (y+this.y)/2;*/
+					////	targetAngle = Math.atan2(this.y - y, x - this.x) + Math.PI / 2;
+					//Math.atan2(this.y - y, x - this.x) + Math.PI/2;
+					// look in direction moving
+					////this.angleold = this.angle;
+					////this.angle = targetAngle;
+					////this.moveTo = "Point " + x + "," + y;
+					//var xthis = this;
+					//this.turnSome(msgnum, 'M', targetAngle, function() {xthis.Step(msgnum, x, y, targetAngle, callbackFunc); xthis = null;});
+					////console.log("going halfway to point:"+x+","+y);
+					//this.Step(msgnum, x, y, targetAngle, callbackFunc);
+					// find which one this is in the main queue & reset the x/y target value!!
+					var kfound = false;
+					for ( k = 0; k < QUEUEDTEXT.length; k++) {
+						if (!kfound && curcharname == HUMAN && QUEUEDTEXT[k].motion == "locomotionPt") {
+							QUEUEDTEXT[k].target[0] = x;
+							QUEUEDTEXT[k].target[1] = y;
+							kfound = true;
+						}
+					}
+					console.log("HUMAN Pt greater accuracy " + x + "," + y);
+					addchar(HUMAN, x, y);
+
+					//}
+				} else if (inlist && myrand >= ACCURACY && TEMPQUEUE[whichitem].motion == "locomotionTarget") {
+					// if this is the human, then do full movement if > accuracy, else do 50% of movement
+					randomcounter++;
+					//if (myrand >= ACCURACY) {
+					var myrandx = Math.random();
+					var myrandy = Math.random();
+					// change my x & y!!
+					targetx = MAXXVAL * myrandx;
+					targety = MAXYVAL * myrandy;
+					//targetx = MAXXCONVERTED*myrandx;
+					//targety = MAXYCONVERTED*myrandy;
+					////targetAngle = Math.atan2(this.y - targety, targetx - this.x) + Math.PI / 2;
+					////console.log("going halfway to target "+item.name+":"+targetx+","+targety+":"+targetAngle);
+					// find which one this is in the main queue & reset the x/y target value!!
+					var k2found = false;
+					for ( k = 0; k < QUEUEDTEXT.length; k++) {
+						if (!k2found && curcharname == HUMAN && QUEUEDTEXT[k].motion == "locomotionTarget") {
+							QUEUEDTEXT[k].target[0] = targetx;
+							QUEUEDTEXT[k].target[1] = targety;
+							QUEUEDTEXT[k].motion = "locomotionPt";
+							k2found = true;
+						}
+					}
+					console.log("HUMAN Target greater accuracy " + targetx + "," + targety);
+					addchar(HUMAN, targetx, targety);
+					//}
+			/*	} else if (inlist && myrand >= ACCURACY) {
+					// give him somewhere to go
+					randomcounter++;
+					var myrandx = Math.random();
+					var myrandy = Math.random();
+					// change my x & y!!
+					var x = MAXXVAL * myrandx;
+					var y = MAXYVAL * myrandy;
+					//QUEUEDTEXT has actor:, motion:, target:, otherstep: {actor:, motion:, target:}  where target: could be object, array, or x:,y:
+					QUEUEDTEXT[QUEUEDTEXT.length] = {
+						actor : characters[i],
+						motion : "locomotionPt",
+						target : {
+							x : x,
+							y : y
+						}
+					};
+					console.log("HUMAN Pt greater accuracy " + x + "," + y);
+					addchar(HUMAN, x, y);
+*/
+				} else {
+					// human character not needing to do something random - so just check if onstage currently
+					// if so, create human in forces
+					if (inlist) {
+						var result;
+						if (TEMPQUEUE[whichitem].target instanceof Array) {
+							result = cleanupxys(TEMPQUEUE[whichitem].target[0], TEMPQUEUE[whichitem].target[1]);
+						} else {
+							result = cleanupxys(TEMPQUEUE[whichitem].target.x, TEMPQUEUE[whichitem].target.y);
+						}
+						console.log("HUMAN inlist " + TEMPQUEUE[whichitem].target.x + "," + TEMPQUEUE[whichitem].target.y + " [" + result.x + "," + result.y + "]");
+
+						if (TEMPQUEUE[whichitem].motion == "locomotionPt") {
+							addchar(HUMAN, result.x, result.y);
+						} else {
+							addchar(HUMAN, TEMPQUEUE[whichitem].target.x, TEMPQUEUE[whichitem].target.y);
+						}
+					} else {
+						if (characters[i].onstage()) {
+							honstagenomvmt++;
+							console.log("HUMAN not in list, but onstage " + honstagenomvmt + ":" + characters[i].x + "," + characters[i].y);
+							addchar(HUMAN, characters[i].x, characters[i].y);
+						} else {
+							console.log("HUMAN not onstage");
+						}
+					}
+				}
+
+			} else {// not human character at all
+				console.log("NOT human");
+				if (inlist) {
+					console.log("inlist NOT human");
+					// might have more than one movement, but not likely - so going to assume only one motion
+					// check if target for character is still onstage & if so, add char in forces
+					if ((TEMPQUEUE[whichitem].target instanceof Character)) {// if my target is a character, check to see their target (if any) before adding character stuff
+						console.log("inlist NOT human target is char");
+						var charname = TEMPQUEUE[whichitem].target.name;
+						var clist = false;
+						var cwhich = -1;
+						for (var l = 0; l < TEMPQUEUE.length; l++) {
+							if (TEMPQUEUE[l].actor.name == charname) {
+								if (!clist) {
+									clist = true;
+									cwhich = l;
+								}
+							}
+						}
+						if (clist) {
+							var myres2 = cleanupxys(TEMPQUEUE[cwhich].target.x, TEMPQUEUE[cwhich].target.y);
+							console.log("inlist NOT human target is char, and target in list");
+							if (TEMPQUEUE[cwhich].target.x > MAXXVAL || TEMPQUEUE[cwhich].target.x < 0 || TEMPQUEUE[cwhich].target.y > MAXYVAL || TEMPQUEUE[cwhich].target.y < 0) {
+								// offstage, so ignore
+								console.log("inlist NOT human target is char, and target in list, but offstage:" + TEMPQUEUE[cwhich].target.name + "--" + myres2.x + "," + myres2.y);
+							} else {
+								console.log("char, inlist, target is char, char in list");
+								addchar(curcharname, TEMPQUEUE[cwhich].target.x - 1, TEMPQUEUE[cwhich].target.y - 1);
+								addchartarget++;
+								console.log("adding target " + TEMPQUEUE[whichitem].target.name + "TARGET" + addchartarget);
+								new forces.Unmoveables(TEMPQUEUE[whichitem].target.name + "TARGET", TEMPQUEUE[cwhich].target.x + 1, TEMPQUEUE[cwhich].target.y + 1, null);
+								new forces.Link("target", TEMPQUEUE[whichitem].actor.name, TEMPQUEUE[whichitem].target.name + "TARGET", 5, 5);
+							}
+						} else {
+							// use the character's current position & add to forces:
+							charintarcharcharnomvmt++;
+							console.log("char, inlist, target is char, char not in list" + charintarcharcharnomvmt);
+							addchar(curcharname, TEMPQUEUE[whichitem].target.x + 1, TEMPQUEUE[whichitem].target.y + 1);
+							addchartarget++;
+							console.log("adding target2 " + TEMPQUEUE[whichitem].target.name + "TARGET" + addchartarget);
+							new forces.Unmoveables(TEMPQUEUE[whichitem].target.name + "TARGET", TEMPQUEUE[whichitem].target.x - 1, TEMPQUEUE[whichitem].target.y - 1, null);
+							new forces.Link("target", TEMPQUEUE[whichitem].actor.name, TEMPQUEUE[whichitem].target.name + "TARGET", 5, 5);
+						}
+					} else {
+						var myres = cleanupxys(TEMPQUEUE[whichitem].target.x, TEMPQUEUE[whichitem].target.y);
+						if ((myres.x > MAXXVAL || myres.x < 0 || myres.y > MAXYVAL || myres.y < 0)) {
+							// offstage, so ignore
+							console.log("inlist NOT human target is NOT char, but offstage:" + myres.x + "," + myres.y);
+							console.log(TEMPQUEUE[whichitem].target);
+						} else {
+							var result;
+							if (TEMPQUEUE[whichitem].target instanceof Array) {
+								result = cleanupxys(TEMPQUEUE[whichitem].target[0], TEMPQUEUE[whichitem].target[1]);
+							} else {
+								result = cleanupxys(TEMPQUEUE[whichitem].target.x, TEMPQUEUE[whichitem].target.y);
+							}
+							if (TEMPQUEUE[whichitem].motion == "locomotionPt") {
+								console.log("char, inlist, target NOT char, target onstage, motion to point:[" + TEMPQUEUE[whichitem].target.x + "," + TEMPQUEUE[whichitem].target.y + "] [" + result.x + "," + result.y + "]");
+								addchar(curcharname, result.x, result.y);
+							} else {
+								console.log("char, inlist, target NOT char, target onstage, motion NOT to point");
+								addchar(curcharname, TEMPQUEUE[whichitem].target.x - 2, TEMPQUEUE[whichitem].target.y - 2);
+								//if (TEMPQUEUE[whichitem].motion == "locomotionTarget") {
+								addchartarget++;
+								console.log("adding target3 " + TEMPQUEUE[whichitem].target.name + "TARGET" + addchartarget);
+								new forces.Unmoveables(TEMPQUEUE[whichitem].target.name, TEMPQUEUE[whichitem].target.x + 2, TEMPQUEUE[whichitem].target.y + 2, null);
+								// adding marks to the stage if is an object or "mark"
+								new forces.Link("target", TEMPQUEUE[whichitem].actor.name, TEMPQUEUE[whichitem].target.name, 5, 5);
+							}
+						}
+					}
+
+				} else {
+					console.log("char, not inlist")
+					// not in list, so just check if character is currently onstage & if so, add char in forces
+					if (characters[i].x > 0 && characters[i].x < MAXXVAL && characters[i].y > 0 && characters[i].y < MAXYVAL) {
+						charonstagenomvmt++;
+						console.log("char, not in list, char onstage" + charonstagenomvmt);
+						addchar(curcharname, characters[i].x, characters[i].y);
+					} else {
+						console.log(curcharname + "--char, not in list, not onstage");
+					}
+				}
+			}
+		}
+		// all chars added to forces, so now need to recalculate forces, then update my QUEUED actions, then invoke them with timeouts & the FORCEWAIT array to call my doneWithForces function
+		forces.recalculate();
+		var myforces = forces.all();
+		if (myforces == null) {
+			console.log("No forces in all object");
+		} else {
+			console.log("All returned forces:");
+			for (var x = 0; x < myforces.length; x++) {
+				console.log(myforces[x].name + ":" + myforces[x].x + "," + myforces[x].y);
+			}
+			console.log("End of returned forces");
+		}
+		if (myforces != null) {
+			for (var f = 0; f < myforces.length; f++) {
+				// go through all people in the forces calculations & reset the QUEUED actions
+				// if not in the qUEUED actions, add a new item to move them to the forces location if not where they currently are
+				// use calledby for comparing names!!
+				// change locomotionTarget to locomotionPt in actions!!
+				if (myforces[f] instanceof forces.FCharacter) {//|| myforces[f] instanceof forces.Human) { // ignore immoveables!!
+					var inflist = false;
+					var whichfitem = -1;
+					for (var q = 0; q < QUEUEDTEXT.length; q++) {
+						if (myforces[f].calledby == QUEUEDTEXT[q].actor.name && (QUEUEDTEXT[q].motion == "locomotionTarget" || QUEUEDTEXT[q].motion == "locomotionPt")) {
+							if (!inflist) {
+								inflist = true;
+								whichfitem = q;
+							}
+							if (myforces[f].x != QUEUEDTEXT[q].target.x || myforces[f].y != QUEUEDTEXT[q].target.y) {
+								QUEUEDTEXT[q].motion = "locomotionPt";
+								QUEUEDTEXT[q].target = {
+									x : myforces[f].x,
+									y : myforces[f].y
+								};
+							} // else keep what I have in case it is a locomotionTarget
+						}
+					}
+					if (!inflist) {
+						// add to QUEUE!
+						// get index of character!!
+						var myindex = 0;
+						for (var c = 0; c < characters.length; c++) {
+							if (characters[c].name == myforces[f].calledby) {
+								myindex = c;
+							}
+						}
+						QUEUEDTEXT[QUEUEDTEXT.length] = {
+							actor : characters[myindex],
+							motion : "locomotionPt",
+							target : {
+								x : myforces[f].x,
+								y : myforces[f].y
+							}
+						};
+					}
+				}
+			}
+		}
+		//curMsg++; // just to be sure to clear out the last message num!!
+		for (var q = 0; q < QUEUEDTEXT.length; q++) {
+			// go through queue and invoke all the saved methods using doneWithForces as the callback (unless there is otherstep, use otherstep as the callback with doenForces as its callback)
+			// add msgnum to FORCEWAIT & set FORCEWAITING to true
+			FORCEWAITING = true;
+			FORCEWAIT[FORCEWAIT.length] = curMsg;
+
+			var mycallbackfunction = "done";
+			if (QUEUEDTEXT[q].otherstep == undefined || QUEUEDTEXT[q].otherstep == null) {
+				// do nothing
+			} else {
+				mycallbackfunction = "other";
+
+			}
+
+			// QUEUEDTEXT has actor:, motion:, target:, otherstep: {actor:, motion:, target:}  where target: could be object, array, or x:,y:
+			// motions include: locomotionTarget, pointAtPoint, pointAtTarget, pickup, putdown, makecharlook, locomotionPt, say
+
+			switch (QUEUEDTEXT[q].motion) {
+				case "locomotionPt":
+					console.log("adding " + curMsg + " locomotionPt " + QUEUEDTEXT[q].actor.name + " to (" + QUEUEDTEXT[q].target.x + ", " + QUEUEDTEXT[q].target.y + ")");
+					if (QUEUEDTEXT[q].otherstep == undefined || QUEUEDTEXT[q].otherstep == null) {
+						QUEUEDTEXT[q].actor.locomotionPt(curMsg, QUEUEDTEXT[q].target.x, QUEUEDTEXT[q].target.y, doneWithForces);
+					} else {
+						var myx = QUEUEDTEXT[q].otherstep.actor;
+						var myy = QUEUEDTEXT[q].otherstep.target;
+						var temp = curMsg;
+						QUEUEDTEXT[q].actor.locomotionPt(curMsg, QUEUEDTEXT[q].target.x, QUEUEDTEXT[q].target.y, function() {
+							myx.pickup(temp, myy, doneWithForces);
+						})
+					}
+
+					break;
+				case "locomotionTarget":
+
+					console.log("adding " + curMsg + " locomotionTarget " + QUEUEDTEXT[q].actor.name + " to (" + QUEUEDTEXT[q].target.x + ", " + QUEUEDTEXT[q].target.y + ")");
+					if (QUEUEDTEXT[q].otherstep == undefined || QUEUEDTEXT[q].otherstep == null) {
+						QUEUEDTEXT[q].actor.locomotionTarget(curMsg, QUEUEDTEXT[q].target, doneWithForces);
+					} else {
+						var myx = QUEUEDTEXT[q].otherstep.actor;
+						var myy = QUEUEDTEXT[q].otherstep.target;
+						var temp = curMsg;
+						QUEUEDTEXT[q].actor.locomotionTarget(curMsg, QUEUEDTEXT[q].target, function() {
+							myx.pickup(temp, myy, doneWithForces);
+						})
+					}
+					break;
+				case "pointAtPoint":
+					console.log("adding " + curMsg + " pointAtPoint " + QUEUEDTEXT[q].actor.name + " to (" + QUEUEDTEXT[q].target.x + ", " + QUEUEDTEXT[q].target.y + ")");
+					QUEUEDTEXT[q].actor.pointAtPoint(curMsg, QUEUEDTEXT[q].target.x, QUEUEDTEXT[q].target.y, doneWithForces);
+					break;
+				case "pointAtTarget":
+					console.log("adding " + curMsg + " pointAtTarget " + QUEUEDTEXT[q].actor.name + " to (" + QUEUEDTEXT[q].target.x + ", " + QUEUEDTEXT[q].target.y + ")");
+					QUEUEDTEXT[q].actor.pointAtTarget(curMsg, QUEUEDTEXT[q].target, doneWithForces);
+					break;
+				case "pickup":
+					console.log("adding " + curMsg + " pickup " + QUEUEDTEXT[q].actor.name + " to (" + QUEUEDTEXT[q].target.x + ", " + QUEUEDTEXT[q].target.y + ")");
+					QUEUEDTEXT[q].actor.pickup(curMsg, QUEUEDTEXT[q].target, doneWithForces);
+					break;
+				case "putdown":
+					console.log("adding " + curMsg + " putdown " + QUEUEDTEXT[q].actor.name + " to (" + QUEUEDTEXT[q].target.x + ", " + QUEUEDTEXT[q].target.y + ")");
+					QUEUEDTEXT[q].actor.putdown(curMsg, QUEUEDTEXT[q].target, doneWithForces);
+					break;
+				case "makecharlook":
+					console.log("adding " + curMsg + " makecharlook " + QUEUEDTEXT[q].actor.name + " to (" + QUEUEDTEXT[q].target.x + ", " + QUEUEDTEXT[q].target.y + ")");
+					makecharlook(QUEUEDTEXT[q].actor, curMsg, QUEUEDTEXT[q].target, doneWithForces);
+					break;
+				case "say":
+					console.log("adding " + curMsg + " say " + QUEUEDTEXT[q].actor.name);
+					QUEUEDTEXT[q].actor.say(curMsg, QUEUEDTEXT[q].target, doneWithForces);
+					break;
+				default:
+					console.log("ERROR - invalid queued text!");
+
+			}
+
+			curMsg++;
+
+		}
+
+		// then cleanup all my forces variables
+		forces.deleteAll();
+	}
+
+	function addchar(who, targetx, targety) {
+		// adds char to forces
+		console.log("Adding forces char " + who + " at (" + targetx + ", " + targety + ")");
+
+		if (who == HUMAN) {
+			new forces.Human(who, targetx, targety, charprecedence.indexOf(who), true, null);
+		} else {
+			new forces.FCharacter(who, targetx, targety, charprecedence.indexOf(who), true, null);
 		}
 	}
+
+	function cleanupxys(x, y) {
+		// when done calculating, reset the x & y values to work for the main function
+
+		var newx = -1 * (x - 2312) / 2;
+		var newy = (y - 209) / 2;
+		return {
+			x : newx,
+			y : newy
+		};
+
+	}
+
 	var HA = null;
 	var G1 = null;
 	var G2 = null;
 	var HO = null;
-	
+	var fulld = new Date();
+	var fulllog = fs.createWriteStream('logs/full' + ( BML ? 'BML' : ( USE_FORCES ? 'Forces' : 'Rules')) + (ACCURACY * 100) + 'log' + (fulld.getMonth() + 1 ) + "." + fulld.getDate() + "." + fulld.getFullYear() + " " + fulld.getHours() + "." + fulld.getMinutes() + "." + fulld.getSeconds() + '.csv', {
+		'flags' : 'a'
+	});
+	fulllog.write('time,minx,maxx,miny,maxy,G1x,G1y,G2x,G2y,HAx,HAy,HOx,HOy\n');
+
 	function writeXYs() {
 		//fulllog.write('time,minx,maxx,miny,maxy,G1x,G1y,G2x,G2y,HAx,HAy,HOx,HOy\n');
 		var minx = -1 * (193 - 2312) / 2;
-			// to adjust for different dimensions for Unity vs JS
-			var maxy = (209 - 209) / 2;
-			var maxx = -1 * (2313 - 2312) / 2;
-			var miny = (2042 - 209) / 2;
-		for (var i=0; i < characters.length;i++) {
+		// to adjust for different dimensions for Unity vs JS
+		var maxy = (209 - 209) / 2;
+		var maxx = -1 * (2313 - 2312) / 2;
+		var miny = (2042 - 209) / 2;
+		for (var i = 0; i < characters.length; i++) {
 			if (characters[i].x < minx) {
 				minx = characters[i].x;
 			}
@@ -308,7 +750,7 @@ function startGame() {
 				}
 			}
 		}
-		fulllog.write((new Date().getTime()).toString() + ',' + minx+',' + maxx+','+ miny +',' +maxy+',' +G1.x+',' +G1.y+',' +G2.x+',' +G2.y+',' +HA.x+',' +HA.y+',' +HO.x +',' +HO.y +'\n');
+		fulllog.write((new Date().getTime()).toString() + ',' + minx + ',' + maxx + ',' + miny + ',' + maxy + ',' + G1.x + ',' + G1.y + ',' + G2.x + ',' + G2.y + ',' + HA.x + ',' + HA.y + ',' + HO.x + ',' + HO.y + '\n');
 	}
 
 	function isCharLine(data) {
@@ -316,9 +758,9 @@ function startGame() {
 
 		var temp = data.replace(" ", "");
 		var pos = chararray.indexOf(temp);
-		if(pos != -1) {
-			if(translatedchararray[pos] == "/CURRENT") {
-				if(charContext != null) {
+		if (pos != -1) {
+			if (translatedchararray[pos] == "/CURRENT") {
+				if (charContext != null) {
 					//console.log("ischarline sending "+charContext.name);
 					return charContext.name;
 				} else {
@@ -338,10 +780,10 @@ function startGame() {
 
 		var temp = data.replace(" ", "");
 		var pos = locationarray.indexOf(temp);
-		if(pos != -1) {
+		if (pos != -1) {
 			//console.log("ispropline sending translated "+ translatedlocationarray[pos]);
 			return translatedlocationarray[pos];
-		} else if(temp[0] == '/') {
+		} else if (temp[0] == '/') {
 			return temp;
 		}
 		//		if (temp == "GRAVE" || temp == "CENTERBACKSTAGE" || temp == "AUDIENCE" || temp == "LANTERN" || temp == "SPADE" || temp == "SHOVEL" || temp == "SKULL" || temp == "STAGERIGHT")  {
@@ -386,7 +828,7 @@ function startGame() {
 				var dist1 = Math.sqrt((actor.x - skull1.x) * (actor.x - skull1.x) + (actor.y - skull1.y) * (actor.y - skull1.y));
 				var dist2 = Math.sqrt((actor.x - skull2.x) * (actor.x - skull2.x) + (actor.y - skull2.y) * (actor.y - skull2.y));
 				//console.log("Checking SKULL, 1:" + dist1 + "," + dist2);
-				if(dist1 < dist2) {
+				if (dist1 < dist2) {
 					return "SKULL1";
 				} else {
 					return "SKULL2";
@@ -395,7 +837,7 @@ function startGame() {
 				break;
 			case "/COIN":
 				// return current actor
-				if(charContext != null) {
+				if (charContext != null) {
 					//console.log("in calcposition returning "+charContext.name);
 					return charContext.name;
 				} else {
@@ -405,7 +847,7 @@ function startGame() {
 				break;
 			case "/CURRENT":
 				// return current actor
-				if(charContext != null) {
+				if (charContext != null) {
 					//console.log("in calcposition returning 1 "+ charContext.name);
 					return charContext.name;
 				} else {
@@ -423,7 +865,7 @@ function startGame() {
 	}
 
 	function isMvmtLine(data) {
-		if(data[0] == '(') {
+		if (data[0] == '(') {
 			return true;
 		}
 		return false;
@@ -434,44 +876,44 @@ function startGame() {
 		singverb = singverb.toUpperCase();
 		//word = singverb;
 
-		if(lookarray.indexOf(singverb) != -1 || lookarray.indexOf(word) != -1) {
+		if (lookarray.indexOf(singverb) != -1 || lookarray.indexOf(word) != -1) {
 			return "LOOK";
 		}
-		if(walkarray.indexOf(singverb) != -1 || walkarray.indexOf(word) != -1) {
+		if (walkarray.indexOf(singverb) != -1 || walkarray.indexOf(word) != -1) {
 			return "MOVE";
 		}
-		if(pointarray.indexOf(singverb) != -1 || pointarray.indexOf(word) != -1) {
+		if (pointarray.indexOf(singverb) != -1 || pointarray.indexOf(word) != -1) {
 			return "POINT";
 		}
-		if(pickuparray.indexOf(singverb) != -1 || pickuparray.indexOf(word) != -1) {
+		if (pickuparray.indexOf(singverb) != -1 || pickuparray.indexOf(word) != -1) {
 			return "PICK";
 		}
-		if(putdownarray.indexOf(singverb) != -1 || putdownarray.indexOf(word) != -1) {
+		if (putdownarray.indexOf(singverb) != -1 || putdownarray.indexOf(word) != -1) {
 			return "PUT";
 		}
-		if(followarray.indexOf(singverb) != -1 || followarray.indexOf(word) != -1) {
+		if (followarray.indexOf(singverb) != -1 || followarray.indexOf(word) != -1) {
 			return "FOLLOW";
 		}
 		// now look for close-enough words to my action words to see if they are a match 90% or better
 		var best = 0;
 		var bestsaved = null;
 		var curscore = 0;
-		for(var i = 0; i < allarrays.length; i++) {
-			for(var j = 0; j < allarrays[i].length; j++) {
+		for (var i = 0; i < allarrays.length; i++) {
+			for (var j = 0; j < allarrays[i].length; j++) {
 				curscore = natural.JaroWinklerDistance(singverb, allarrays[i][j]);
-				if(curscore > best) {
+				if (curscore > best) {
 					best = curscore;
 					bestsaved = allarrays[i][0];
 				}
 				curscore = natural.JaroWinklerDistance(word, allarrays[i][j]);
-				if(curscore > best) {
+				if (curscore > best) {
 					best = curscore;
 					bestsaved = allarrays[i][0];
 				}
 			}
 		}
 
-		if(best > .9) {
+		if (best > .9) {
 			return bestsaved;
 		}
 		return null;
@@ -492,7 +934,7 @@ function startGame() {
 		}
 		}*/
 		//		if (!notready) {
-		if(myctr[thisLine][num] == mvmtlines[thisLine][num].length) {
+		if (myctr[thisLine][num] == mvmtlines[thisLine][num].length) {
 			//console.log(mvmtlines[thisLine][num]);
 			//console.log(mytype[thisLine][num]);
 			planmovement(thisLine, num, basemsgnum);
@@ -502,17 +944,18 @@ function startGame() {
 
 	function translate(thisLine, num, firstverb, actor, target, msgnum) {
 		var best = null;
-		if(mvmtlines[thisLine][num][firstverb] == 'empty') {
+		if (mvmtlines[thisLine][num][firstverb] == 'empty') {
 			// skip, can't do anything
 			console.log("ERROR - verb is empty, skipping");
 			var xmsgnum = msgnum;
 			TIMEOUTS[TIMEOUTS.length] = setTimeout(function() {
-				readyForNextMsg2(xmsgnum); xmsgnum = null;
+				readyForNextMsg2(xmsgnum);
+				xmsgnum = null;
 			}, 100);
-		} else if(mvmtlines[thisLine][num][firstverb].length == 2) {
+		} else if (mvmtlines[thisLine][num][firstverb].length == 2) {
 			best = isActionWord(mvmtlines[thisLine][num][firstverb][0]);
 			mvmtlines[thisLine][num][firstverb][1].forEach(function(synonym) {
-				if( best = null) {
+				if ( best = null) {
 					best = isActionWord(synonym);
 				}
 			});
@@ -520,22 +963,22 @@ function startGame() {
 			best = isActionWord(mvmtlines[thisLine][num][firstverb]);
 		}
 
-		if(target != null && target[0] == '/') {
+		if (target != null && target[0] == '/') {
 			// need to translate the target!!
 			//console.log("translating target "+target);
-			if(best == "FOLLOW") {
+			if (best == "FOLLOW") {
 				target = calcPosition(actor, target);
 			} else {
 				target = calcPosition(target, actor);
 			}
 
 		}
-		if(!( target instanceof Array) && target != null) {
+		if (!( target instanceof Array) && target != null) {
 			var temp = findItem('C', target);
-			if(temp == null) {
+			if (temp == null) {
 				temp = findItem('O', target);
 			}
-			if(temp != null) {
+			if (temp != null) {
 				target = temp;
 			}
 		}
@@ -545,17 +988,20 @@ function startGame() {
 		// need to figure out how to find a point in 3 scenarios, for now just clearing the commands out
 		switch(best) {
 			case "MOVE":
-				if( target instanceof Array) {
-					console.log("***"+actor.name + " MOVE " + target +" readyForNextMsg2");
+				if ( target instanceof Array) {
+					console.log(actor.name + " MOVE " + target + " readyForNextMsg2");
 					checkmovetarget(actor, msgnum, target, readyForNextMsg2);
 					//actor.locomotionPt(msgnum, target[0], target[1], readyForNextMsg2);
-				} else if(target != null) {
-					console.log("***"+actor.name + " MOVE " + (( target instanceof Character || target instanceof Pawn) ? (target.name) : (target))  +" readyForNextMsg2");
-					if (target instanceof Character ||(target instanceof Pawn && (target.moveable || target.name == 'GRAVE' || target.name == 'STEPS' || target.name == 'STOOL'))) {
-						actor.forcesMoveTo = target;
+				} else if (target != null) {
+					console.log(actor.name + " MOVE " + (( target instanceof Character || target instanceof Pawn) ? (target.name) : (target)) + " readyForNextMsg2");
+					if ( target instanceof Character || ( target instanceof Pawn && (target.moveable || target.name == 'GRAVE' || target.name == 'STEPS' || target.name == 'STOOL'))) {
+						//QUEUED[QUEUED.length] = actor.locomotionTarget(msgnum, target, readyForNextMsg2);
+						QUEUEDTEXT[QUEUEDTEXT.length] = {
+							actor : actor,
+							motion : "locomotionTarget",
+							target : target
+						};
 						readyForNextMsg2(msgnum);
-						//updAllChars(actor, msgnum, target, null, null, readyForNextMsg2);
-						//actor.locomotionTarget(msgnum, target, readyForNextMsg2);
 					} else {
 						checkmovetarget(actor, msgnum, target, readyForNextMsg2);
 					}
@@ -565,107 +1011,154 @@ function startGame() {
 					console.log("No target to move to");
 					var xmsgnum = msgnum;
 					TIMEOUTS[TIMEOUTS.length] = setTimeout(function() {
-						readyForNextMsg2(xmsgnum);xmsgnum = null;
+						readyForNextMsg2(xmsgnum);
+						xmsgnum = null;
 					}, 100);
 				}
 				break;
 			case "POINT":
-				if( target instanceof Array) {
-					console.log("***"+actor.name + " POINT " + target);
-					actor.nextStep[actor.nextStep.length] = function(whichnum) {actor.pointAtPoint(whichnum, target[0], target[1], readyForNextMsgForces);};
-						readyForNextMsg2(msgnum);
-					//actor.pointAtPoint(msgnum, target[0], target[1], readyForNextMsg2);
-				} else if(target != null) {
-					console.log("***"+actor.name + " POINT " + (( target instanceof Character || target instanceof Pawn) ? (target.name) : (target)));
-					actor.nextStep[actor.nextStep.length] = function(whichnum) {actor.pointAtTarget(whichnum, target, readyForNextMsgForces);};
-						readyForNextMsg2(msgnum);
-					//actor.pointAtTarget(msgnum, target, readyForNextMsg2);
+				if ( target instanceof Array) {
+					console.log(actor.name + " POINT " + target);
+					//QUEUED[QUEUED.length] = actor.pointAtPoint(msgnum, target[0], target[1], readyForNextMsg2);
+					QUEUEDTEXT[QUEUEDTEXT.length] = {
+						actor : actor,
+						motion : "pointAtPoint",
+						target : target
+					};
+					readyForNextMsg2(msgnum);
+				} else if (target != null) {
+					console.log(actor.name + " POINT " + (( target instanceof Character || target instanceof Pawn) ? (target.name) : (target)));
+					//QUEUED[QUEUED.length] = actor.pointAtTarget(msgnum, target, readyForNextMsg2);
+					QUEUEDTEXT[QUEUEDTEXT.length] = {
+						actor : actor,
+						motion : "pointAtTarget",
+						target : target
+					};
+					readyForNextMsg2(msgnum);
 				} else {
 					// need to figure out a point
 					console.log("No target to point to");
 					var xmsgnum = msgnum;
 					TIMEOUTS[TIMEOUTS.length] = setTimeout(function() {
-						readyForNextMsg2(xmsgnum); xmsgnum = null;
+						readyForNextMsg2(xmsgnum);
+						xmsgnum = null;
 					}, 100);
 				}
 				break;
 			case "PICK":
-				if(target != null) {
-					console.log("***"+actor.name + " PICK " + (( target instanceof Character || target instanceof Pawn) ? (target.name) : (target)));
+				if (target != null) {
+					console.log(actor.name + " PICK " + (( target instanceof Character || target instanceof Pawn) ? (target.name) : (target)));
 					// if not at target, walk to it first, then pick it up
-					if (distance(actor.x, actor.y, target.x, target.y) > characterSize+objectSize) {
+					if (distance(actor.x, actor.y, target.x, target.y) > characterSize + objectSize) {
 						//console.log("locomotion readyForNextMsg2");
-						actor.forcesMoveTo = target;
-						actor.nextStep[actor.nextStep.length] = function(whichnum) {actor.pickup(whichnum, target, readyForNextMsgForces);};
+						//QUEUED[QUEUED.length] = actor.locomotionTarget(msgnum, target, function() {actor.pickup(msgnum, target, readyForNextMsg2);});
+						QUEUEDTEXT[QUEUEDTEXT.length] = {
+							actor : actor,
+							motion : "locomotionTarget",
+							target : target,
+							otherstep : {
+								actor : actor,
+								motion : "pickup",
+								target : target
+							}
+						};
 						readyForNextMsg2(msgnum);
-						//updAllChars(actor, msgnum, target, null, null, function() {actor.pickup(msgnum, target, readyForNextMsg2);});
-						//actor.locomotionTarget(msgnum, target, function() {actor.pickup(msgnum, target, readyForNextMsg2);});
 						//actor.pickup(msgnum, target, readyForNextMsg2);
 					} else {
-						actor.nextStep[actor.nextStep.length] = function(whichnum) {actor.pickup(whichnum, target, readyForNextMsgForces);};
+						//QUEUED[QUEUED.length] = actor.pickup(msgnum, target, readyForNextMsg2);
+						QUEUEDTEXT[QUEUEDTEXT.length] = {
+							actor : actor,
+							motion : "pickup",
+							target : target
+						};
 						readyForNextMsg2(msgnum);
-						//actor.pickup(msgnum, target, readyForNextMsg2);
 					}
 				} else {
 					console.log("ERROR!! Trying to pick up nothing");
 					var xmsgnum = msgnum;
 					TIMEOUTS[TIMEOUTS.length] = setTimeout(function() {
-						readyForNextMsg2(xmsgnum); xmsgnum = null;
+						readyForNextMsg2(xmsgnum);
+						xmsgnum = null;
 					}, 100);
 				}
 				break;
 			case "PUT":
-				if(target != null) {
-					console.log("***"+actor.name + " PUT " + (( target instanceof Character || target instanceof Pawn) ? (target.name) : (target)));
-					actor.nextStep[actor.nextStep.length] = function(whichnum) {actor.putdown(whichnum, target, readyForNextMsgForces);};
-						readyForNextMsg2(msgnum);
-					//actor.putdown(msgnum, target, readyForNextMsg2);
+				if (target != null) {
+					console.log(actor.name + " PUT " + (( target instanceof Character || target instanceof Pawn) ? (target.name) : (target)));
+					//QUEUED[QUEUED.length] = actor.putdown(msgnum, target, readyForNextMsg2);
+					QUEUEDTEXT[QUEUEDTEXT.length] = {
+						actor : actor,
+						motion : "putdown",
+						target : target
+					};
+					readyForNextMsg2(msgnum);
 				} else {
 					console.log("ERROR!! Trying to put down nothing");
 					var xmsgnum = msgnum;
 					TIMEOUTS[TIMEOUTS.length] = setTimeout(function() {
-						readyForNextMsg2(xmsgnum); xmsgnum = null;
+						readyForNextMsg2(xmsgnum);
+						xmsgnum = null;
 					}, 100);
 				}
 				break;
 			case "LOOK":
-				if( target instanceof Array) {
-					console.log("***"+actor.name + " LOOK " + target);
-					makecharlook(actor,msgnum,target,readyForNextMsg2);
+				if ( target instanceof Array) {
+					console.log(actor.name + " LOOK " + target);
+					//QUEUED[QUEUED.length] = makecharlook(actor,msgnum,target,readyForNextMsg2);
+					QUEUEDTEXT[QUEUEDTEXT.length] = {
+						actor : actor,
+						motion : "makecharlook",
+						target : target
+					};
+					readyForNextMsg2(msgnum);
 					//actor.lookAtPt(msgnum, target[0], target[1], readyForNextMsg2);
-				} else if(target != null) {
-					console.log("***"+actor.name + " LOOK " + (( target instanceof Character || target instanceof Pawn) ? (target.name) : (target)));
-					makecharlook(actor, msgnum, target, readyForNextMsg2);
+				} else if (target != null) {
+					console.log(actor.name + " LOOK " + (( target instanceof Character || target instanceof Pawn) ? (target.name) : (target)));
+					//QUEUED[QUEUED.length] = makecharlook(actor, msgnum, target, readyForNextMsg2);
+					QUEUEDTEXT[QUEUEDTEXT.length] = {
+						actor : actor,
+						motion : "makecharlook",
+						target : target
+					};
+					readyForNextMsg2(msgnum);
 					//actor.lookAtTarget(msgnum, target, readyForNextMsg2);
 				} else {
 					// need to figure out a point
 					console.log("No target to look to");
 					var xmsgnum = msgnum;
 					TIMEOUTS[TIMEOUTS.length] = setTimeout(function() {
-						readyForNextMsg2(xmsgnum); xmsgnum = null;
+						readyForNextMsg2(xmsgnum);
+						xmsgnum = null;
 					}, 100);
 				}
 				break;
 			case "FOLLOW":
-				if(target != null) {
-					console.log("***"+actor.name + " FOLLOW " + (( target instanceof Character || target instanceof Pawn) ? (target.name) : (target)));
+				if (target != null) {
+					console.log(actor.name + " FOLLOW " + (( target instanceof Character || target instanceof Pawn) ? (target.name) : (target)));
 					var xtarget = target;
 					var xmsgnum = msgnum;
 					var xactor = actor;
-					TIMEOUTS[TIMEOUTS.length] = setTimeout(function() {var xxtarget = xtarget; var xxmsgnum = xmsgnum; var xxactor = xactor; 
-						xtarget.forcesMoveTo = xactor;
-						//actor.nextStep = function(whichnum) {actor.pickup(whichnum, target, readyForNextMsgForces);}
-						readyForNextMsg2(msgnum);},
-						//updAllChars(xtarget, xmsgnum, xactor, null, null, readyForNextMsg2)},
-						//xtarget.locomotionTarget(xmsgnum, xactor, //function() {checkmovetarget(xxtarget, xxmsgnum, xxactor, readyForNextMsg2); xxtarget = null; xxmsgnum = null; xxactor = null;}); xtarget = null; xmsgnum = null; xactor = null;}
-						//readyForNextMsg2)}, 
-						65);
+					TIMEOUTS[TIMEOUTS.length] = setTimeout(function() {
+						var xxtarget = xtarget;
+						var xxmsgnum = xmsgnum;
+						var xxactor = xactor;
+						//QUEUED[QUEUED.length] = xtarget.locomotionTarget(xmsgnum, xactor, //function() {checkmovetarget(xxtarget, xxmsgnum, xxactor, readyForNextMsg2); xxtarget = null; xxmsgnum = null; xxactor = null;}); xtarget = null; xmsgnum = null; xactor = null;}
+						//readyForNextMsg2);
+						QUEUEDTEXT[QUEUEDTEXT.length] = {
+							actor : xtarget,
+							motion : "locomotionTarget",
+							target : xactor
+						};
+						readyForNextMsg2(xmsgnum);
+					}, 65);
+
 				} else {
 					// need to figure out a point
 					console.log("No target to follow");
 					var xmsgnum = msgnum;
 					TIMEOUTS[TIMEOUTS.length] = setTimeout(function() {
-						readyForNextMsg2(xmsgnum); xmsgnum = null;
+						readyForNextMsg2(xmsgnum);
+						xmsgnum = null;
 					}, 100);
 				}
 				break;
@@ -679,7 +1172,8 @@ function startGame() {
 				console.log("ERROR - unknown verb!");
 				var xmsgnum = msgnum;
 				TIMEOUTS[TIMEOUTS.length] = setTimeout(function() {
-					readyForNextMsg2(xmsgnum); xmsgnum = null;
+					readyForNextMsg2(xmsgnum);
+					xmsgnum = null;
 				}, 100);
 				break;
 		}
@@ -690,7 +1184,6 @@ function startGame() {
 		dist = Math.sqrt((x - obj2x) * (x - obj2x) + (y - obj2y) * (y - obj2y));
 		return dist;
 	}
-	
 
 	function checkmovetarget(actor, msgnum, target, callbackFunc) {
 		var aud = findItem('O', 'AUDIENCE');
@@ -699,90 +1192,102 @@ function startGame() {
 		var chardisttome = 0;
 		var charAngle = 0;
 		var changed = false;
-		var x = 0;//target.x;
-		var y = 0;//target.y;
+		var x = 0;
+		//target.x;
+		var y = 0;
+		//target.y;
 		var isarray = false;
-		if (target instanceof Array) {
+		if ( target instanceof Array) {
 			x = target[0];
 			y = target[1];
-			isarray = true; // can adjust our target
+			isarray = true;
+			// can adjust our target
 		} else {
-			if (target instanceof Pawn && (target.moveable || (target.name == 'GRAVE' || target.name == 'STEPS' || target.name == 'STOOL'))) {
-				ispawn = true; // need to reach target
+			if ( target instanceof Pawn && (target.moveable || (target.name == 'GRAVE' || target.name == 'STEPS' || target.name == 'STOOL'))) {
+				ispawn = true;
+				// need to reach target
 			}
 			x = target.x;
 			y = target.y;
 		}
 		var diff = 0;
 		var audAngle = 0;
-		//console.log("In checkmovetarget="+actor.name+", target is "+((target instanceof Array)?("["+target[0]+","+target[1]+"]"):(target.x+","+target.y)));
-		if ((target instanceof Array && coordonstage(target)) || (!(target instanceof Array) && ingrid(target))) {
-		//if(target instanceof Array || target.onstage()) {
+		//console.log("In checkmovetarget=" + actor.name + ", target is " + (( target instanceof Array) ? ("[" + target[0] + "," + target[1] + "]") : (target.x + "," + target.y)));
+		if (( target instanceof Array && coordonstage(target)) || (!( target instanceof Array) && ingrid(target))) {
+			//if(target instanceof Array || target.onstage()) {
 			//console.log("In if stmt of checkmovetarget");
-			for(var i = 0; i < characters.length; i++) {
+			for (var i = 0; i < characters.length; i++) {
 				//console.log("In for characters.length 1 of checkmovetarget");
-				if(characters[i].onstage()) {
-					if(characters[i].name == actor.name) {
+				if (characters[i].onstage()) {
+					if (characters[i].name == actor.name) {
 						// ignore
 					} else {
 						chardisttoaud = distance(characters[i].x, characters[i].y, characters[i].x, aud.y);
-						//console.log("Checking "+actor.name+" vs "+characters[i].name +", myauddist="+mydisttoaud+", theirs="+chardisttoaud);
-						if(charprecedence.indexOf(actor.name) < charprecedence.indexOf(characters[i].name) && chardisttoaud < mydisttoaud) {
+						//console.log("Checking " + actor.name + " vs " + characters[i].name + ", myauddist=" + mydisttoaud + ", theirs=" + chardisttoaud);
+						if (charprecedence.indexOf(actor.name) < charprecedence.indexOf(characters[i].name) && chardisttoaud < mydisttoaud) {
 							// move my target closer to the audience
-							diff = mydisttoaud - chardisttoaud + 53; //(-1 * (106 - 2312) / 2);
+							diff = mydisttoaud - chardisttoaud + 53;
+							//(-1 * (106 - 2312) / 2);
 							// move 3 feet closer to audience
 							//audAngle = Math.atan2(y - aud.y, aud.x - x) + Math.PI / 2;
-							audAngle = 0; // want this to just be in the positive y axis direction
-							if(audAngle > Math.PI * 2) {
+							audAngle = 0;
+							// want this to just be in the positive y axis direction
+							if (audAngle > Math.PI * 2) {
 								audAngle = audAngle - Math.PI * 2;
 
-							} else if(audAngle < 0) {
+							} else if (audAngle < 0) {
 								audAngle = audAngle + Math.PI * 2;
 
 							}
 							if (isarray) {
-								x = x;// + diff * Math.sin(audAngle);
-								y = y - diff;// * Math.cos(audAngle);
-								//console.log("updating because actor "+actor.name+" is less important than char "+characters[i].name+": ["+x+","+y+"]");
+								x = x;
+								// + diff * Math.sin(audAngle);
+								y = y - diff;
+								// * Math.cos(audAngle);
+								console.log("updating because actor " + actor.name + " is less important than char " + characters[i].name + ": [" + x + "," + y + "]");
 							} else {
-							/*	// move target instead - add new message
-								console.log("moving other char because actor "+actor.name+" is less important than char "+characters[i].name+": ["+characters[i].x+","+(characters[i].y-diff)+"]");
-								WAITINGON[WAITINGON.length] = curMsg;
-								// this is so we stop everything until we've parsed and acted on this line
-								WAITING = true;
-								
-								checkmovetarget(characters[i], curMsg, [characters[i].x, characters[i].y + diff], callbackFunc);
-								curMsg++;*/
+								/*	// move target instead - add new message
+								 console.log("moving other char because actor "+actor.name+" is less important than char "+characters[i].name+": ["+characters[i].x+","+(characters[i].y-diff)+"]");
+								 WAITINGON[WAITINGON.length] = curMsg;
+								 // this is so we stop everything until we've parsed and acted on this line
+								 WAITING = true;
+
+								 checkmovetarget(characters[i], curMsg, [characters[i].x, characters[i].y + diff], callbackFunc);
+								 curMsg++;*/
 							}
-							
+
 							//changed = true;
-						} else if(charprecedence.indexOf(actor.name) > charprecedence.indexOf(characters[i].name) && mydisttoaud < chardisttoaud) {
+						} else if (charprecedence.indexOf(actor.name) > charprecedence.indexOf(characters[i].name) && mydisttoaud < chardisttoaud) {
 							// move my target further from audience
-							diff = chardisttoaud - mydisttoaud +  53; //(-1 * (106 - 2312) / 2);
+							diff = chardisttoaud - mydisttoaud + 53;
+							//(-1 * (106 - 2312) / 2);
 							// move 3 feet closer to audience
-							audAngle = 0; // want this to be in the positive y axis direction
+							audAngle = 0;
+							// want this to be in the positive y axis direction
 							//audAngle = Math.atan2(y - aud.y, aud.x - x) + Math.PI / 2;
 							audAngle = audAngle - Math.PI;
 							// change to opposite direction
-							if(audAngle > Math.PI * 2) {
+							if (audAngle > Math.PI * 2) {
 								audAngle = audAngle - Math.PI * 2;
 
-							} else if(audAngle < 0) {
+							} else if (audAngle < 0) {
 								audAngle = audAngle + Math.PI * 2;
 
 							}
 							if (isarray) {
-								x = x;// + diff * Math.sin(audAngle);
-								y = y + diff;// * Math.cos(audAngle);
-								//console.log("Updating because actor "+actor.name+" is more important than char "+characters[i].name+": ["+x+","+y+"]");
+								x = x;
+								// + diff * Math.sin(audAngle);
+								y = y + diff;
+								// * Math.cos(audAngle);
+								console.log("Updating because actor " + actor.name + " is more important than char " + characters[i].name + ": [" + x + "," + y + "]");
 							} else {
-							/*	console.log("moving other char because actor "+actor.name+" is more important than char "+characters[i].name+": ["+characters[i].x+","+(characters[i].y-diff)+"]");
-								WAITINGON[WAITINGON.length] = curMsg;
-								// this is so we stop everything until we've parsed and acted on this line
-								WAITING = true;
-								
-								checkmovetarget(characters[i], curMsg, [characters[i].x, characters[i].y - diff], callbackFunc);
-								curMsg++;*/
+								/*	console.log("moving other char because actor "+actor.name+" is more important than char "+characters[i].name+": ["+characters[i].x+","+(characters[i].y-diff)+"]");
+								 WAITINGON[WAITINGON.length] = curMsg;
+								 // this is so we stop everything until we've parsed and acted on this line
+								 WAITING = true;
+
+								 checkmovetarget(characters[i], curMsg, [characters[i].x, characters[i].y - diff], callbackFunc);
+								 curMsg++;*/
 							}
 							//changed = true;
 						} else {
@@ -790,35 +1295,35 @@ function startGame() {
 						}
 					}
 					//console.log("UPDATED "+actor.name+" vs "+characters[i].name +", myauddist="+mydisttoaud+", theirs="+chardisttoaud);
-				} // else not worth moving because of this character
+				}// else not worth moving because of this character
 				mydisttoaud = distance(x, y, x, aud.y);
 			}
 			// check to make sure no closer than 3 feet (-1*(106-2312)/2) from any character, else adjust again
-			for(var j = 0; j < characters.length; j++) {
+			for (var j = 0; j < characters.length; j++) {
 				//console.log("in second for loop of checkmovetarget");
-				if(characters[j].onstage()) {
-					if(characters[j].name == actor.name) {
+				if (characters[j].onstage()) {
+					if (characters[j].name == actor.name) {
 						// ignore
 					} else {
-						
+
 						chardisttome = distance(x, y, characters[j].x, characters[j].y);
-						//console.log("Checking "+actor.name+" vs "+characters[j].name +", distance apart="+chardisttome);
-						if(chardisttome <  53) {; //(-1 * (106 - 2312) / 2)) {
+						//console.log("Checking " + actor.name + " vs " + characters[j].name + ", distance apart=" + chardisttome);
+						if (chardisttome < 53) {;//(-1 * (106 - 2312) / 2)) {
 							// move away from them in the opposite path of where currently at
 							charAngle = Math.atan2(y - characters[j].y, characters[j].x - x) + Math.PI / 2;
 							charAngle = charAngle - Math.PI;
 							// change to opposite direction
-							if(charAngle > Math.PI * 2) {
+							if (charAngle > Math.PI * 2) {
 								charAngle = charAngle - Math.PI * 2;
 
-							} else if(charAngle < 0) {
+							} else if (charAngle < 0) {
 								charAngle = charAngle + Math.PI * 2;
 
 							}
-							
+
 							x = x + diff * Math.sin(charAngle);
 							y = y + diff * Math.cos(charAngle);
-							//console.log("Updating because actor "+actor.name+ " is too close to char "+characters[j].name+": ["+x+","+y+"]");
+							console.log("Updating because actor " + actor.name + " is too close to char " + characters[j].name + ": [" + x + "," + y + "]");
 							changed = true;
 						} else {
 							//console.log("Doing nothing in checkmovetarget 2nd loop");
@@ -829,40 +1334,51 @@ function startGame() {
 			}
 			//translate back to paper grid coordinates
 			//if (!changed) {
-				x = (x * 2 / -1) + 2312;
-				y = (y * 2) + 209;
-				
+			x = (x * 2 / -1) + 2312;
+			y = (y * 2) + 209;
+
 			//}
-			//console.log("In checkmovetarget RESULT="+actor.name+", target is "+((target instanceof Array)?("["+target[0]+","+target[1]+"]"):(target.x+","+target.y))+", updated to: ["+x+","+y+"]");
+			//console.log("In checkmovetarget RESULT=" + actor.name + ", target is " + (( target instanceof Array) ? ("[" + target[0] + "," + target[1] + "]") : (target.x + "," + target.y)) + ", updated to: [" + x + "," + y + "]");
 			// done calcs, so let's move now
-			if (!(target instanceof Array) && x == target.x && y == target.y) {
-				actor.forcesMoveTo = target;
-						//actor.nextStep = function(whichnum) {actor.pickup(whichnum, target, readyForNextMsgForces);}
-						readyForNextMsg2(msgnum);
-						//updAllChars(actor, msgnum, target, null, null, callbackFunc);
-				//actor.locomotionTarget(msgnum, target, callbackFunc);
+			if (!( target instanceof Array) && x == target.x && y == target.y) {
+				//QUEUED[QUEUED.length] = actor.locomotionTarget(msgnum, target, callbackFunc);
+				QUEUEDTEXT[QUEUEDTEXT.length] = {
+					actor : actor,
+					motion : "locomotionTarget",
+					target : target
+				};
+				callbackFunc(msgnum);
 			} else {
-				actor.forcesMoveTo = "Point "+x+","+y;//{x:x, y:y};
-						//actor.nextStep = function(whichnum) {actor.pickup(whichnum, target, readyForNextMsgForces);}
-						readyForNextMsg2(msgnum);
-						//updAllChars(actor, msgnum, null, x,y, callbackFunc);
-				//actor.locomotionPt(msgnum, x, y, callbackFunc);
+				//QUEUED[QUEUED.length] = actor.locomotionPt(msgnum, x, y, callbackFunc);
+				QUEUEDTEXT[QUEUEDTEXT.length] = {
+					actor : actor,
+					motion : "locomotionPt",
+					target : {
+						x : x,
+						y : y
+					}
+				};
+				callbackFunc(msgnum);
 			}
-		} else if (target instanceof Array) {
+		} else if ( target instanceof Array) {
 			//console.log("checkmovetarget - skipped all char checks because array");
-			actor.forcesMoveTo = "Point "+x+","+y;
-						//actor.nextStep = function(whichnum) {actor.pickup(whichnum, target, readyForNextMsgForces);}
-						readyForNextMsg2(msgnum);
-						//updAllChars(actor, msgnum, null, target[0], target[1], callbackFunc);
-			//actor.locomotionPt(msgnum, target[0], target[1], callbackFunc);
+			//QUEUED[QUEUED.length] = actor.locomotionPt(msgnum, target[0], target[1], callbackFunc);
+			QUEUEDTEXT[QUEUEDTEXT.length] = {
+				actor : actor,
+				motion : "locomotionPt",
+				target : target
+			};
+			callbackFunc(msgnum);
 		} else {
 			//console.log("checkmovetarget - skipped all char checks for other");
 			// just move to the target since we're walking offstage or to a pawn
-			actor.forcesMoveTo = target;
-						//actor.nextStep = function(whichnum) {actor.pickup(whichnum, target, readyForNextMsgForces);}
-						readyForNextMsg2(msgnum);
-						//updAllChars(actor, msgnum, target, null, null, callbackFunc);
-			//actor.locomotionTarget(msgnum, target, callbackFunc);
+			//QUEUED[QUEUED.length] = actor.locomotionTarget(msgnum, target, callbackFunc);
+			QUEUEDTEXT[QUEUEDTEXT.length] = {
+				actor : actor,
+				motion : "locomotionTarget",
+				target : target
+			};
+			callbackFunc(msgnum);
 		}
 	}
 
@@ -880,28 +1396,30 @@ function startGame() {
 		var target = null;
 		var temp = null;
 
-		if(firstverb == -1) {
+		if (firstverb == -1) {
 			// cannot do anything, so skip
 			console.log("ERROR - no verb, skipping");
 			var xbasemsgnum = basemsgnum;
 			var xnum = num;
 			TIMEOUTS[TIMEOUTS.length] = setTimeout(function() {
-				readyForNextMsg2(xbasemsgnum + xnum); xbasemsgnum = null; xnum = null;
+				readyForNextMsg2(xbasemsgnum + xnum);
+				xbasemsgnum = null;
+				xnum = null;
 			}, 100);
 		} else {
-			if(allnouns[0] != -1) {
+			if (allnouns[0] != -1) {
 				// have at least one noun
 				allnouns.forEach(function(nounindex, index) {
 					var tocheck = null;
-					if(mvmtlines[thisLine][num][nounindex].length == 2) {
+					if (mvmtlines[thisLine][num][nounindex].length == 2) {
 						tocheck = mvmtlines[thisLine][num][nounindex][0];
 					} else {
 						tocheck = mvmtlines[thisLine][num][nounindex];
 					}
 					temp = isCharLine(tocheck);
 					//console.log("isCharLine = "+temp);
-					if(temp != null && (index < firstnindex || firstnindex == -1)) {
-						if(firstnindex != -1) {
+					if (temp != null && (index < firstnindex || firstnindex == -1)) {
+						if (firstnindex != -1) {
 							secondnindex = firstnindex;
 							secondnoun = firstnoun;
 							secondtype = firsttype;
@@ -909,16 +1427,16 @@ function startGame() {
 						firstnindex = index;
 						firstnoun = temp;
 						firsttype = 'C';
-					} else if(temp != null && (index < secondnindex || secondnindex == -1)) {
+					} else if (temp != null && (index < secondnindex || secondnindex == -1)) {
 						secondnindex = index;
 						secondnoun = temp;
 						secondtype = 'C';
-					} else if(temp == null) {
+					} else if (temp == null) {
 
 						temp = isPropLine(tocheck);
 						//console.log("isPropLine = "+temp);
-						if(temp != null && (index < firstnindex || firstnindex == -1)) {
-							if(firstnindex != -1) {
+						if (temp != null && (index < firstnindex || firstnindex == -1)) {
+							if (firstnindex != -1) {
 								secondnindex = firstnindex;
 								secondnoun = firstnoun;
 								secondtype = firsttype;
@@ -926,45 +1444,49 @@ function startGame() {
 							firstnindex = index;
 							firstnoun = temp;
 							firsttype = 'O';
-						} else if(temp != null && (index < secondnindex || secondnindex == -1)) {
+						} else if (temp != null && (index < secondnindex || secondnindex == -1)) {
 							secondnindex = index;
 							secondnoun = temp;
 							secondtype = 'O';
-						} else if(temp == null) {
+						} else if (temp == null) {
 
 							// do nothing???
 						}
 					}
 				});
 				//console.log("NOUNS:"+firstnoun+","+secondnoun);
-				if(secondnindex == -1) {
-					if(firstnindex == -1) {
+				if (secondnindex == -1) {
+					if (firstnindex == -1) {
 						// no nouns that we can parse, so skip
 						console.log("ERROR - no nouns that we can parse, skipping");
 						var xbasemsgnum = basemsgnum;
 						var xnum = num;
 						TIMEOUTS[TIMEOUTS.length] = setTimeout(function() {
-							readyForNextMsg2(xbasemsgnum + xnum); xbasemsgnum = null; xnum = null;
+							readyForNextMsg2(xbasemsgnum + xnum);
+							xbasemsgnum = null;
+							xnum = null;
 						}, 100);
 					} else {
 						// have only one noun, so assume we use current context and this as the target
-						if(charContext == null) {
+						if (charContext == null) {
 							actor = gravedigger1;
-							//console.log("assuming character context is gravedigger1");
+							console.log("assuming character context is gravedigger1");
 						} else {
 							actor = charContext;
 						}
-						if(firstnoun[0] == '/') {
+						if (firstnoun[0] == '/') {
 							target = calcPosition(firstnoun, actor);
 						} else {
 							target = findItem(firsttype, firstnoun);
 						}
-						if(target == null) {
+						if (target == null) {
 							console.log("ERROR - couldn't find target despite it being of type " + firsttype + "," + firstnoun);
 							var xbasemsgnum = basemsgnum;
 							var xnum = num;
 							TIMEOUTS[TIMEOUTS.length] = setTimeout(function() {
-								readyForNextMsg2(xbasemsgnum + xnum); xbasemsgnum = null;xnum = null;
+								readyForNextMsg2(xbasemsgnum + xnum);
+								xbasemsgnum = null;
+								xnum = null;
 							}, 100);
 						} else {
 							translate(thisLine, num, firstverb, actor, target, basemsgnum + num);
@@ -973,25 +1495,29 @@ function startGame() {
 				} else {
 					// have two nouns, so lets use them!!
 					actor = findItem(firsttype, firstnoun);
-					if(actor == null) {
+					if (actor == null) {
 						console.log("ERROR - couldn't find actor despite it being of type " + firsttype + "," + firstnoun);
 						var xbasemsgnum = basemsgnum;
 						var xnum = num;
 						TIMEOUTS[TIMEOUTS.length] = setTimeout(function() {
-							readyForNextMsg2(xbasemsgnum + xnum); xbasemsgnum = null; xnum = null;
+							readyForNextMsg2(xbasemsgnum + xnum);
+							xbasemsgnum = null;
+							xnum = null;
 						}, 100);
 					} else {
-						if(secondnoun[0] == '/') {
+						if (secondnoun[0] == '/') {
 							target = calcPosition(secondnoun, actor);
 						} else {
 							target = findItem(secondtype, secondnoun);
 						}
-						if(target == null) {
+						if (target == null) {
 							console.log("ERROR - couldn't find second target despite it being of type " + secondtype + "," + secondnoun);
 							var xbasemsgnum = basemsgnum;
 							var xnum = num;
 							TIMEOUTS[TIMEOUTS.length] = setTimeout(function() {
-								readyForNextMsg2(xbasemsgnum + xnum); xbasemsgnum = null; xnum = null;
+								readyForNextMsg2(xbasemsgnum + xnum);
+								xbasemsgnum = null;
+								xnum = null;
 							}, 100);
 						} else {
 							translate(thisLine, num, firstverb, actor, target, basemsgnum + num);
@@ -1005,7 +1531,9 @@ function startGame() {
 				var xbasemsgnum = basemsgnum;
 				var xnum = num;
 				TIMEOUTS[TIMEOUTS.length] = setTimeout(function() {
-					readyForNextMsg2(xbasemsgnum + xnum); xbasemsgnum = null; xnum = null;
+					readyForNextMsg2(xbasemsgnum + xnum);
+					xbasemsgnum = null;
+					xnum = null;
 				}, 100);
 			}
 		}
@@ -1030,7 +1558,7 @@ function startGame() {
 		myctr[thisLine][num] = 0;
 		parsedSentence.forEach(function(word, index) {
 			//for (var i = 0; i < parsedSentence.length; i++) {
-			if(word.length == 1) {
+			if (word.length == 1) {
 				// ignore, not worth working with
 				setmvmtlines(thisLine, num, index, 'empty', 'o', basemsgnum);
 			} else {
@@ -1038,10 +1566,10 @@ function startGame() {
 				//console.log("parsed "+thisLine+","+num+","+mynum+","+parsedSentence.length+":"+word);
 				var nchar = isCharLine(word);
 				var prop = isPropLine(word);
-				if(nchar != null || prop != null) {
+				if (nchar != null || prop != null) {
 					// save this item & ignore doing a lookup
 					//console.log("Mvmt Parse!! - found character:"+thisLine+","+num+","+mynum+","+parsedSentence.length+": "+word);
-					if(nchar != null) {
+					if (nchar != null) {
 						setmvmtlines(thisLine, num, mynum, nchar, 'n', basemsgnum);
 					} else {
 						setmvmtlines(thisLine, num, mynum, prop, 'n', basemsgnum);
@@ -1050,7 +1578,7 @@ function startGame() {
 				} else {
 					// check if one of our reserved words before I do a lookup? save some async calls...
 					var actionword = isActionWord(word);
-					if(actionword != null) {
+					if (actionword != null) {
 						setmvmtlines(thisLine, num, mynum, actionword, 'v', basemsgnum);
 						//mvmtlines[thisLine][num][mynum] = actionword;
 					} else {
@@ -1058,13 +1586,13 @@ function startGame() {
 							// do I only want to look at the first one?
 							//	console.log("results=");
 							//	console.log(results);
-							if(results != undefined && results != null && results.length > 0 && (results[0].pos == 'n' || results[0].pos == 'v')) {
+							if (results != undefined && results != null && results.length > 0 && (results[0].pos == 'n' || results[0].pos == 'v')) {
 								//console.log("Mvmt Parse!! - "+thisLine+","+num+","+mynum+","+parsedSentence.length+": "+results[0].pos+", "+results[0].synonyms);
 								setmvmtlines(thisLine, num, mynum, [word, results[0].synonyms], results[0].pos, basemsgnum);
 								//mvmtlines[thisLine][num][mynum] = [word, results[0].synonyms.toUpperCase()];
 								//mynum = null;
 							} else {
-								if(results != undefined && results != null && results.length > 0) {
+								if (results != undefined && results != null && results.length > 0) {
 									setmvmtlines(thisLine, num, mynum, "empty", results[0].pos, basemsgnum);
 								} else {
 									setmvmtlines(thisLine, num, mynum, "empty", 'o', basemsgnum);
@@ -1110,13 +1638,13 @@ function startGame() {
 		//	console.log("first three lines are:"+ALLDATA[0]+"+\n"+ALLDATA[1]+"+\n"+ALLDATA[2]+"+\n");
 		// send messages for each line until hit either a movement or a character line, but do for at least one line always
 		do {
-			if(curLine != ALLDATA.length) {
+			if (curLine != ALLDATA.length) {
 				//console.log(ALLDATA[curLine]);
 				//console.log(WAITINGON.length);
 				// need to save the current character context in a global
 				// if char line, save in global and get next line
 				nchar = isCharLine(ALLDATA[curLine]);
-				if(nchar != null) {
+				if (nchar != null) {
 					//console.log("is char line+"+ALLDATA[curLine]+"+");
 
 					prevCharContext = charContext;
@@ -1133,7 +1661,7 @@ function startGame() {
 					//		TIMEOUTS[TIMEOUTS.length] = setTimeout(function(){readyForNextMsg2(curMsg)},100);
 					//		curMsg++;
 					//console.log("char-"+((prevCharContext==null)?("null"):(prevCharContext.name))+","+charContext.name);
-				} else if(isMvmtLine(ALLDATA[curLine])) {
+				} else if (isMvmtLine(ALLDATA[curLine])) {
 					//console.log("is mvmt line");
 
 					// parse out my spatial stuff
@@ -1143,8 +1671,8 @@ function startGame() {
 					myctr[curLine] = new Array(puncList.length);
 					mytype[curLine] = new Array(puncList.length);
 					var basemsgnum = curMsg;
-					for(var j = 0; j < puncList.length; j++) {
-						if(puncList[j][0] == ' ') {
+					for (var j = 0; j < puncList.length; j++) {
+						if (puncList[j][0] == ' ') {
 							// remove leading spaces
 							puncList[j] = puncList[j].replace(/^\s+|\s+$/g, "");
 						}
@@ -1153,7 +1681,7 @@ function startGame() {
 						// this is so we stop everything until we've parsed and acted on this line
 						WAITING = true;
 						curMsg++;
-						if(puncList[j].length != 0) {
+						if (puncList[j].length != 0) {
 
 							parseMvmt(puncList[j], curLine, j, basemsgnum);
 						} else {
@@ -1196,24 +1724,34 @@ function startGame() {
 					WAITING = true;
 					//console.log((new Date().getTime()).toString()+"-added message#"+curMsg + ALLDATA[curLine]);
 					//	TIMEOUTS[TIMEOUTS.length] = setTimeout(function(){actor.say(curMsg, ALLDATA[curLine], readyForNextMsg2)},100);
-					actor.nextStep[actor.nextStep.length] = function(whichnum) {actor.say(whichnum, ALLDATA[curLine], readyForNextMsgForces);};
-						readyForNextMsg2(curMsg);
-					//actor.say(curMsg, ALLDATA[curLine], readyForNextMsg2);
+					//QUEUED[QUEUED.length] = actor.say(curMsg, ALLDATA[curLine], readyForNextMsg2);
+					QUEUEDTEXT[QUEUEDTEXT.length] = {
+						actor : actor,
+						motion : "say",
+						target : ALLDATA[curLine]
+					};
+					readyForNextMsg2(curMsg);
 					curMsg++;
 					//var thischar = null;
 					//var refchar = null;
 					// also send some gaze stuff for all chars to look at current char
-					for(var i = 0; i < characters.length; i++) {
-						if(characters[i].name == actor.name) {
+					for (var i = 0; i < characters.length; i++) {
+						if (characters[i].name == actor.name) {
 							// do nothing for the gaze
 						} else {
 
-							if(ingrid(characters[i])) {
+							if (ingrid(characters[i])) {
 								// make them look at the current character speaking -- only if onstage
 								//console.log("Adding msg#"+curMsg);
 								WAITINGON[WAITINGON.length] = curMsg;
 								WAITING = true;
-								makecharlook(characters[i], curMsg, actor, readyForNextMsg2);
+								//QUEUED[QUEUED.length] = makecharlook(characters[i], curMsg, actor, readyForNextMsg2);
+								QUEUEDTEXT[QUEUEDTEXT.length] = {
+									actor : characters[i],
+									motion : "makecharlook",
+									target : actor
+								};
+								readyForNextMsg2(curMsg);
 								//var thischar = characters[i];
 								//var refchar = charContext;
 								//console.log("-added message#"+curMsg+","+characters[i].name+","+actor.name);
@@ -1227,90 +1765,94 @@ function startGame() {
 				curLine++;
 				//console.log("after curLine++="+ALLDATA[curLine]);
 			} else {
-				console.log("Play is finished!!");
+				console.log("Play is finished!!" + randomcounter);
+				var doned = new Date();
+				var donelog = fs.createWriteStream('logs/full' + ( BML ? 'BML' : ( USE_FORCES ? 'Forces' : 'Rules')) + (ACCURACY * 100) + 'done' + (fulld.getMonth() + 1 ) + "." + fulld.getDate() + "." + fulld.getFullYear() + " " + fulld.getHours() + "." + fulld.getMinutes() + "." + fulld.getSeconds() + '.csv', {
+					'flags' : 'a'
+				});
+				donelog.write('done\n');
+
 			}
 		} while (curLine < ALLDATA.length && (isCharLine(ALLDATA[curLine]) == null && !(isMvmtLine(ALLDATA[curLine])))  || (curLine != 0 && isCharLine(ALLDATA[curLine-1]) != null && isMvmtLine(ALLDATA[curLine])));
 
 	}
 
 	function makecharlook(who, msgnum, target, callbackFunc) {
-		if (!(target instanceof Array) && who.name == target.name) {
-				callbackFunc(msgnum); // do nothing, doesn't make sense to look at yourself
+		if (!( target instanceof Array) && who.name == target.name) {
+			callbackFunc(msgnum);
+			// do nothing, doesn't make sense to look at yourself
 		} else {
 			var diff = 0;
 			//console.log("Make char "+who.name+" ["+who.x+","+who.y+"] look at "+((target instanceof Array)?("["+target[0]+","+target[1]+"]"):(target.name)));
 			var aud = findItem('O', "AUDIENCE");
-			if (target instanceof Array) {
-				target = {x:target[0], y:target[1]};
+			if ( target instanceof Array) {
+				target = {
+					x : target[0],
+					y : target[1]
+				};
 			} else {
-				
+
 			}
 			var targetAngle = Math.atan2(who.y - target.y, target.x - who.x) + Math.PI / 2;
-			if(targetAngle > Math.PI * 2) {
+			if (targetAngle > Math.PI * 2) {
 				targetAngle = targetAngle - Math.PI * 2;
-	
-			} else if(targetAngle < 0) {
+
+			} else if (targetAngle < 0) {
 				targetAngle = targetAngle + Math.PI * 2;
-	
+
 			}
 			/*
-			var audAngle = 0;//Math.atan2(who.y - aud.y, aud.x - who.x) + Math.PI / 2;
-			if(audAngle > Math.PI * 2) {
-				audAngle = audAngle - Math.PI * 2;
-	
-			} else if(audAngle < 0) {
-				audAngle = audAngle + Math.PI * 2;
-	
-			}
-			if (targetAngle < Math.PI) { // so average in correct side/direction
-				audAngle = 0;
-			} else {
-				audAngle = Math.PI*2;
-			}*/
-			if (targetAngle < Math.PI/2 || targetAngle > Math.PI*3/2) {
+			 var audAngle = 0;//Math.atan2(who.y - aud.y, aud.x - who.x) + Math.PI / 2;
+			 if(audAngle > Math.PI * 2) {
+			 audAngle = audAngle - Math.PI * 2;
+
+			 } else if(audAngle < 0) {
+			 audAngle = audAngle + Math.PI * 2;
+
+			 }
+			 if (targetAngle < Math.PI) { // so average in correct side/direction
+			 audAngle = 0;
+			 } else {
+			 audAngle = Math.PI*2;
+			 }*/
+			if (targetAngle < Math.PI / 2 || targetAngle > Math.PI * 3 / 2) {
 				//console.log("Upd char "+who.name+" ["+who.x+","+who.y+"] look at "+((target instanceof Array)?("["+target[0]+","+target[1]+"]"):(target.name)));
-				who.nextStep[who.nextStep.length] = function(whichnum) {who.lookAtTarget(whichnum, target, readyForNextMsgForces);};
-						readyForNextMsg2(msgnum);
-				//who.lookAtTarget(msgnum, target, callbackFunc);
+				who.lookAtTarget(msgnum, target, callbackFunc);
 			} else if (targetAngle <= Math.PI) {
-				
-				ptx = who.x + characterSize * Math.sin(Math.PI/2);
-				pty = who.y + characterSize * Math.cos(Math.PI/2);
+
+				ptx = who.x + characterSize * Math.sin(Math.PI / 2);
+				pty = who.y + characterSize * Math.cos(Math.PI / 2);
 				ptx = (ptx * 2 / -1) + 2312;
 				pty = (pty * 2) + 209;
 				//console.log("Upd char "+who.name+" [+"+who.x+","+who.y+"] look at "+"["+ptx+","+pty+"], angle=Math.PI/2");
-				who.nextStep[who.nextStep.length] = function(whichnum) {who.lookAtPt(whichnum, ptx,pty, readyForNextMsgForces);};
-						readyForNextMsg2(msgnum);
-				//who.lookAtPt(msgnum, ptx, pty, callbackFunc);
+				who.lookAtPt(msgnum, ptx, pty, callbackFunc);
 			} else {
-				
-				ptx = who.x + characterSize * Math.sin(3*Math.PI/2);
-				pty = who.y + characterSize * Math.cos(3*Math.PI/2);
+
+				ptx = who.x + characterSize * Math.sin(3 * Math.PI / 2);
+				pty = who.y + characterSize * Math.cos(3 * Math.PI / 2);
 				ptx = (ptx * 2 / -1) + 2312;
 				pty = (pty * 2) + 209;
 				//console.log("Upd char "+who.name+" [+"+who.x+","+who.y+"] look at "+"["+ptx+","+pty+"], angle=3*Math.PI/2");
-				who.nextStep[who.nextStep.length] = function(whichnum) {who.lookAtPt(whichnum, ptx,pty, readyForNextMsgForces);};
-						readyForNextMsg2(msgnum);
-				//who.lookAtPt(msgnum, ptx, pty, callbackFunc);
-			}
-			/*
-			// calculate the angle between target & audience, then call lookAtTarget or lookAtPt
-			diff = Math.abs(targetAngle - audAngle);
-			console.log("Target angle for "+who.name+"="+(targetAngle/Math.PI*180)+" vs audience ="+(audAngle/Math.PI*180)+", diff="+(diff/Math.PI*180) );
-			if(diff <= (Math.PI/2) || diff >= (3*Math.PI/2)) {
-				console.log("Just going to look at target");
-				who.lookAtTarget(msgnum, target, callbackFunc);
-				
-			} else {
-				
-				var ptAngle = (targetAngle + audAngle) / 2;
-				var ptx = who.x + characterSize * Math.sin(ptAngle);
-				var pty = who.y + characterSize * Math.cos(ptAngle);
-				console.log("Looking at modified target angle "+(ptAngle/Math.PI*180)+": ["+ptx+","+pty+"]");
 				who.lookAtPt(msgnum, ptx, pty, callbackFunc);
 			}
-			//console.log("UPDATED Target angle for "+who.name+"="+(targetAngle/Math.PI*180)+" vs audience ="+(audAngle/Math.PI*180)+", diff="+(diff/Math.PI*180) );
-			*/
+			/*
+			 // calculate the angle between target & audience, then call lookAtTarget or lookAtPt
+			 diff = Math.abs(targetAngle - audAngle);
+			 console.log("Target angle for "+who.name+"="+(targetAngle/Math.PI*180)+" vs audience ="+(audAngle/Math.PI*180)+", diff="+(diff/Math.PI*180) );
+			 if(diff <= (Math.PI/2) || diff >= (3*Math.PI/2)) {
+			 console.log("Just going to look at target");
+			 who.lookAtTarget(msgnum, target, callbackFunc);
+
+			 } else {
+
+			 var ptAngle = (targetAngle + audAngle) / 2;
+			 var ptx = who.x + characterSize * Math.sin(ptAngle);
+			 var pty = who.y + characterSize * Math.cos(ptAngle);
+			 console.log("Looking at modified target angle "+(ptAngle/Math.PI*180)+": ["+ptx+","+pty+"]");
+			 who.lookAtPt(msgnum, ptx, pty, callbackFunc);
+			 }
+			 //console.log("UPDATED Target angle for "+who.name+"="+(targetAngle/Math.PI*180)+" vs audience ="+(audAngle/Math.PI*180)+", diff="+(diff/Math.PI*180) );
+			 */
 		}
 	}
 
@@ -1321,8 +1863,8 @@ function startGame() {
 		var minx = -1 * (2313 - 2312) / 2;
 		var maxy = (2042 - 209) / 2;
 		//console.log("Comparing "+mychar.name+" at ("+mychar.x+","+mychar.y+") to ("+minx+"-"+maxx+","+miny+"-"+maxy+")");
-		if(target[0] > minx && target[0] < maxx) {
-			if(target[1] > miny && target[1] < maxy) {
+		if (target[0] > minx && target[0] < maxx) {
+			if (target[1] > miny && target[1] < maxy) {
 				//console.log("Array target is onstage ["+target[0]+","+target[1]+"]");
 				return true;
 			}
@@ -1330,7 +1872,7 @@ function startGame() {
 		//console.log("Array target is NOT onstage ["+target[0]+","+target[1]+"]");
 		return false;
 	}
-	
+
 	function ingrid(mychar) {
 		var maxx = -1 * (193 - 2312) / 2;
 		// to adjust for different dimensions for Unity vs JS
@@ -1338,8 +1880,8 @@ function startGame() {
 		var minx = -1 * (2313 - 2312) / 2;
 		var maxy = (2042 - 209) / 2;
 		//console.log("Comparing "+mychar.name+" at ("+mychar.x+","+mychar.y+") to ("+minx+"-"+maxx+","+miny+"-"+maxy+")");
-		if(mychar.x > minx && mychar.x < maxx) {
-			if(mychar.y > miny && mychar.y < maxy) {
+		if (mychar.x > minx && mychar.x < maxx) {
+			if (mychar.y > miny && mychar.y < maxy) {
 				//console.log("Char target is onstage "+mychar.name + ": ["+mychar.x+","+mychar.y+"]");
 				return true;
 			}
@@ -1358,19 +1900,19 @@ function startGame() {
 		//for (var i=0; i < curLineData.length; i++) {
 		//console.log(curLineData[i]);
 		//}
-		if(ALLDATA[curLine] != undefined) {
+		if (ALLDATA[curLine] != undefined) {
 			do {
 				curLineData = ALLDATA[curLine].split('\t');
-				if(curLineData.length > 1) {
+				if (curLineData.length > 1) {
 					//console.log("sent this message #"+curLine+":"+ALLDATA[curLine]);
-					if(curLineData[1] == "SPEAK") {
+					if (curLineData[1] == "SPEAK") {
 						// just saying speech, so do a tiny bit of "nonverbal behavior" with it
 						// curLineData[2] = actor
 						// curLineData[3] = recipient
 						// curLineData[4] = xml for speech -- remove all <> tags within it too!
 						var actor = findItem('C', curLineData[2]);
 						var recipient = findItem('C', curLineData[3]);
-						if(recipient == null) {
+						if (recipient == null) {
 							recipient = findItem('O', curLineData[3]);
 						}
 						//get text
@@ -1429,6 +1971,14 @@ function startGame() {
 				curLine++;
 				//curLineData = ALLDATA[curLine].split('\t');
 			} while (curLineData[0] == "Y" || (ALLDATA[curLine] != null && ALLDATA[curLine] != undefined && ALLDATA[curLine].replace(/^\s+|\s+$/g, '')  == ""));
+		} else {
+			console.log("Play is finished!!" + randomcounter);
+			var doned1 = new Date();
+			var done1log = fs.createWriteStream('logs/full' + ( BML ? 'BML' : ( USE_FORCES ? 'Forces' : 'Rules')) + (ACCURACY * 100) + 'done' + (fulld.getMonth() + 1 ) + "." + fulld.getDate() + "." + fulld.getFullYear() + " " + fulld.getHours() + "." + fulld.getMinutes() + "." + fulld.getSeconds() + '.csv', {
+				'flags' : 'a'
+			});
+			done1log.write('done\n');
+
 		}
 	}
 
@@ -1454,29 +2004,25 @@ function startGame() {
 		var temp = null;
 		var x = null;
 		var y = null;
-		if(text.BML != undefined) {
+		if (text.BML != undefined) {
 			//console.log(text.BML);
-			if(text.BML.REACH != undefined) {
-				for(var key in text.BML.REACH["@"]) {
-					if(key == "ACTION") {
+			if (text.BML.REACH != undefined) {
+				for (var key in text.BML.REACH["@"]) {
+					if (key == "ACTION") {
 						action = text.BML.REACH["@"][key];
-					} else if(key == "TARGET") {
+					} else if (key == "TARGET") {
 						target = findItem('O', text.BML.REACH["@"][key]);
 					}
 				}
-				if(action != null && target != null) {
+				if (action != null && target != null) {
 					WAITINGON[WAITINGON.length] = curMsg;
 					WAITING = true;
 					//console.log("added message#"+curMsg);
-					if(action == "PICK-UP") {
-						who.nextStep[who.nextStep.length] = function(whichnum) {who.pickup(whichnum, target, readyForNextMsgForces);};
-						readyForNextMsg2(curMsg);
-						//who.pickup(curMsg, target, readyForNextMsg);
+					if (action == "PICK-UP") {
+						who.pickup(curMsg, target, readyForNextMsg);
 						//console.log("pickedup");
 					} else {
-						who.nextStep[who.nextStep.length] = function(whichnum) {who.putdown(whichnum, target, readyForNextMsgForces);};
-						readyForNextMsg2(curMsg);
-						//who.putdown(curMsg, target, readyForNextMsg);
+						who.putdown(curMsg, target, readyForNextMsg);
 						//console.log("putdown");
 					}
 					curMsg++;
@@ -1487,13 +2033,13 @@ function startGame() {
 				action = null;
 				target = null;
 			}
-			if(text.BML.LOCOMOTION != undefined) {
-				for(var key in text.BML.LOCOMOTION["@"]) {
-					if(key == "TARGET") {
+			if (text.BML.LOCOMOTION != undefined) {
+				for (var key in text.BML.LOCOMOTION["@"]) {
+					if (key == "TARGET") {
 						temp = text.BML.LOCOMOTION["@"][key].split(" ");
-						if(temp.length > 1) {
+						if (temp.length > 1) {
 							// then have points not a target
-							if(temp.length == 2) {
+							if (temp.length == 2) {
 								// have one point
 								x = temp[0];
 								y = temp[1];
@@ -1501,7 +2047,7 @@ function startGame() {
 								// have array
 								x = new Array();
 								y = new Array();
-								for(var i = 0; i < temp.length; i = i + 2) {
+								for (var i = 0; i < temp.length; i = i + 2) {
 									x[x.length] = temp[i];
 									y[y.length] = temp[i + 1];
 								}
@@ -1509,33 +2055,25 @@ function startGame() {
 						} else {
 							// have a target
 							target = findItem('C', text.BML.LOCOMOTION["@"][key]);
-							if(target == null) {
+							if (target == null) {
 								target = findItem('O', text.BML.LOCOMOTION["@"][key]);
 							}
 						}
-					} else if(key == "FOLLOW") {
+					} else if (key == "FOLLOW") {
 						target = findItem('C', text.BML.LOCOMOTION["@"][key]);
 					}
 				}
-				if(target != null) {
+				if (target != null) {
 					WAITINGON[WAITINGON.length] = curMsg;
 					WAITING = true;
 					//console.log("added message#"+curMsg);
-					who.forcesMoveTo = target;
-						//actor.nextStep = function(whichnum) {actor.pickup(whichnum, target, readyForNextMsgForces);}
-						readyForNextMsg2(msgnum);
-						//updAllChars(who, curMsg, target, null, null, readyForNextMsg);
-					//who.locomotionTarget(curMsg, target, readyForNextMsg);
+					who.locomotionTarget(curMsg, target, readyForNextMsg);
 					curMsg++;
-				} else if(x != null) {
+				} else if (x != null) {
 					WAITINGON[WAITINGON.length] = curMsg;
 					WAITING = true;
 					//console.log("added message#"+curMsg);
-					actor.forcesMoveTo = "Point "+x+","+y;//target;
-						//actor.nextStep = function(whichnum) {actor.pickup(whichnum, target, readyForNextMsgForces);}
-						readyForNextMsg2(msgnum);
-						//updAllChars(who, curMsg, null, x, y, readyForNextMsg);
-					//who.locomotionPt(curMsg, x, y, readyForNextMsg);
+					who.locomotionPt(curMsg, x, y, readyForNextMsg);
 					curMsg++;
 				} else {
 					console.log("ERROR reading LOCOMOTION message");
@@ -1546,36 +2084,32 @@ function startGame() {
 				y = null;
 				temp = null;
 			}
-			if(text.BML.GAZE != undefined) {
-				for(var key in text.BML.GAZE["@"]) {
-					if(key == "TARGET") {
+			if (text.BML.GAZE != undefined) {
+				for (var key in text.BML.GAZE["@"]) {
+					if (key == "TARGET") {
 						temp = text.BML.GAZE["@"][key].split(" ");
-						if(temp.length > 1) {
+						if (temp.length > 1) {
 							x = temp[0];
 							y = temp[1];
 						} else {
 							target = findItem('C', text.BML.GAZE["@"][key]);
-							if(target == null) {
+							if (target == null) {
 								target = findItem('O', text.BML.GAZE["@"][key]);
 							}
 						}
 					}
 				}
-				if(target != null) {
+				if (target != null) {
 					WAITINGON[WAITINGON.length] = curMsg;
 					WAITING = true;
 					//console.log("added message#"+curMsg);
-					who.nextStep[who.nextStep.length] = function(whichnum) {who.lookAtTarget(whichnum, target, readyForNextMsgForces);};
-						readyForNextMsg2(curMsg);
-					//who.lookAtTarget(curMsg, target, readyForNextMsg);
+					who.lookAtTarget(curMsg, target, readyForNextMsg);
 					curMsg++;
-				} else if(x != null) {
+				} else if (x != null) {
 					WAITINGON[WAITINGON.length] = curMsg;
 					WAITING = true;
 					//console.log("added message#"+curMsg);
-					who.nextStep[who.nextStep.length] = function(whichnum) {who.lookAtPt(whichnum, x,y, readyForNextMsgForces);};
-						readyForNextMsg2(curMsg);
-					//who.lookAtPt(curMsg, x, y, readyForNextMsg);
+					who.lookAtPt(curMsg, x, y, readyForNextMsg);
 					curMsg++;
 				} else {
 					console.log("ERROR reading GAZE message");
@@ -1586,40 +2120,36 @@ function startGame() {
 				y = null;
 				temp = null;
 			}
-			if(text.BML.GESTURE != undefined) {
-				for(var key in text.BML.GESTURE["@"]) {
-					if(key == "TARGET") {
+			if (text.BML.GESTURE != undefined) {
+				for (var key in text.BML.GESTURE["@"]) {
+					if (key == "TARGET") {
 						temp = text.BML.GESTURE["@"][key].split(" ");
-						if(temp.length > 1) {
+						if (temp.length > 1) {
 							x = temp[0];
 							y = temp[1];
 						} else {
 							target = findItem('C', text.BML.GESTURE["@"][key]);
-							if(target == null) {
+							if (target == null) {
 								target = findItem('O', text.BML.GESTURE["@"][key]);
 							}
 						}
-					} else if(key == "LEXEME") {
-						if(text.BML.GESTURE["@"][key] == "POINT") {
+					} else if (key == "LEXEME") {
+						if (text.BML.GESTURE["@"][key] == "POINT") {
 							lexeme = text.BML.GESTURE["@"][key];
 						} // ignore if not pointing in 2D won't matter
 					}
 				}
-				if(target != null && lexeme != null) {
+				if (target != null && lexeme != null) {
 					WAITINGON[WAITINGON.length] = curMsg;
 					WAITING = true;
 					//console.log("added message#"+curMsg);
-					who.nextStep[who.nextStep.length] = function(whichnum) {who.pointAtTarget(whichnum, target, readyForNextMsgForces);};
-						readyForNextMsg2(curMsg);
-					//who.pointAtTarget(curMsg, target, readyForNextMsg);
+					who.pointAtTarget(curMsg, target, readyForNextMsg);
 					curMsg++;
-				} else if(x != null && lexeme != null) {
+				} else if (x != null && lexeme != null) {
 					WAITINGON[WAITINGON.length] = curMsg;
 					WAITING = true;
 					//console.log("added message#"+curMsg);
-					who.nextStep[who.nextStep.length] = function(whichnum) {who.pointAtPoint(whichnum, x,y, readyForNextMsgForces);};
-						readyForNextMsg2(curMsg);
-					//who.pointAtPoint(curMsg, x, y, readyForNextMsg);
+					who.pointAtPoint(curMsg, x, y, readyForNextMsg);
 					curMsg++;
 				} else {
 					console.log("ERROR reading GESTURE message");
@@ -1661,7 +2191,7 @@ function startGame() {
 			 thischar = null;
 			 thisobj = null;
 			 }*/
-			if(text.BML.REACH == undefined && text.BML.LOCOMOTION == undefined && text.BML.GAZE == undefined && text.BML.GESTURE == undefined) {
+			if (text.BML.REACH == undefined && text.BML.LOCOMOTION == undefined && text.BML.GAZE == undefined && text.BML.GESTURE == undefined) {
 				console.log("ERROR reading message - unknown BML command");
 				console.log(text.BML);
 			}
@@ -1680,10 +2210,10 @@ function startGame() {
 			remaining += data;
 			//console.log(data);
 			var index = remaining.indexOf('\n');
-			while(index > -1) {
+			while (index > -1) {
 				var line = remaining.substring(0, index);
 				remaining = remaining.substring(index + 1);
-				if(line.indexOf('\n') == 0) {
+				if (line.indexOf('\n') == 0) {
 					// skip blank lines
 				} else {
 					saveLine(line);
@@ -1693,11 +2223,11 @@ function startGame() {
 		});
 
 		inputFile.on('end', function() {
-			if(remaining.length > 0) {
+			if (remaining.length > 0) {
 				saveLine(remaining);
 				inputFile.close();
 			}
-			if(BML) {
+			if (BML) {
 				nextLine();
 				// for BML processing
 			} else {
@@ -1714,17 +2244,17 @@ function startGame() {
 		data = data.replace(/^\s+|\s+$/g, "");
 		// trim front & end for easier parsing checks
 		var temp = data.split(" ");
-		if(isMvmtLine(data)) {
+		if (isMvmtLine(data)) {
 			// this is an action - save in uppercase
 			data = data.toUpperCase();
 		} else {
 			var nchar = isCharLine(data);
-			if(nchar != null) {
+			if (nchar != null) {
 				// this is a character definition - save in uppercase
 				data = data.toUpperCase();
 			} // otherwise is speech, so don't convert the text
 		}
-		if(data.length != 0) {
+		if (data.length != 0) {
 			ALLDATA[ALLDATA.length] = data;
 			// save it to the array
 		}
@@ -1732,18 +2262,18 @@ function startGame() {
 	}
 
 	function findItem(type, name) {
-		if(type == 'C') {
+		if (type == 'C') {
 			// loop through all chars
-			for(var i = 0; i < characters.length; i++) {
-				if(characters[i].name == name) {
+			for (var i = 0; i < characters.length; i++) {
+				if (characters[i].name == name) {
 					//console.log("finditem C gives "+name);
 					return characters[i];
 				}
 			}
 		} else {
 			// loop through all objects
-			for(var j = 0; j < pawns.length; j++) {
-				if(pawns[j].name == name) {
+			for (var j = 0; j < pawns.length; j++) {
+				if (pawns[j].name == name) {
 					//console.log("finditem O gives "+name);
 					return pawns[j];
 				}
@@ -1774,17 +2304,13 @@ function startGame() {
 		this.angleold = this.angle;
 		this.pointToold = this.pointTo;
 		this.pointAngleold = this.pointAngle;
-		this.forcesMoveTo = null;
-		this.fchartargettime = 0;
-		this.fchartarget = null;
-		this.nextStep = new Array();
-		if(characters == null) {
+		if (characters == null) {
 			characters = new Array();
 			characters[0] = this;
 		} else {
 			characters[characters.length] = this;
 		}
-		if(allObjects == null) {
+		if (allObjects == null) {
 			allObjects = new Array();
 			allObjects[0] = this;
 		} else {
@@ -1793,13 +2319,50 @@ function startGame() {
 		//var filesystemobj = new ActiveXObject("Scripting.FileSystemObject");
 		//this.logfile = filesystemobj.OpenTextFile(logpath+this.name+".log");
 		//this.logfile.WriteLine((new Date().time).ToString()+"\tFileOpened");
-		var d = new Date();
-		var filename = "CHAR-" + (d.getMonth() + 1 ) + "." + d.getDate() + "." + d.getFullYear() + " " + d.getHours() + "." + d.getMinutes() + "." + d.getSeconds();
-		var log = fs.createWriteStream('logs/' + this.name + '-' + filename + '.csv', {
-			'flags' : 'a'
-		});
-		log.write('time,x,y,rot,pointangle\n');
-		
+		/*var d = new Date();
+		 var filename = "CHAR-" + (d.getMonth() + 1 ) + "." + d.getDate() + "." + d.getFullYear() + " " + d.getHours() + "." + d.getMinutes() + "." + d.getSeconds();
+		 var log = fs.createWriteStream('logs/' + this.name + '-' + filename + '.csv', {
+		 'flags' : 'a'
+		 });
+		 log.write('time,x,y,rot,pointangle\n');*/
+
+		this.update = function() {
+			// log current location & time to file
+			var temp = null;
+			//this.logfile.WriteLine((new Date().time).ToString()+"\t"+this.x+"\t"+this.y+"\t"+this.angle);
+
+			// check moveTo target to see if it moved & adjust
+			if (this.moveTo != null && (this.moveTo instanceof Character || this.moveTo instanceof Pawn)) {
+				// calc angle & save
+				temp = Math.atan2(this.y - this.moveTo.y, this.moveTo.x - this.x) + Math.PI / 2;
+				if (this.angle != temp) {
+					this.angleold = this.angle;
+					this.angle = temp;
+				}
+			} else if (this.moveTo != null && !(this.moveTo instanceof Character || this.moveTo instanceof Pawn)) {
+				// do nothing because moving to a specific point and need to look at the point, not the gaze for now
+			} else if (this.gazeTo != null && (this.gazeTo instanceof Character || this.gazeTo instanceof Pawn) && !this.turning) {// check gaze target to see if it moved & adjust
+				// calc angle & save
+				temp = Math.atan2(this.y - this.gazeTo.y, this.gazeTo.x - this.x) + Math.PI / 2;
+				if (this.angle != temp) {
+					this.angleold = this.angle;
+					this.angle = temp;
+				}
+			}
+
+			// check point target to see if it moved & adjust
+			if (this.pointTo != null && (this.pointTo instanceof Character || this.pointTo instanceof Pawn)) {
+				// calc angle & save
+				temp = Math.atan2(this.y - this.pointTo.y, this.pointTo.x - this.x) + Math.PI / 2;
+				if (this.pointAngle != temp) {
+					this.pointAngleold = this.pointAngle;
+					this.pointAngle = temp;
+				}
+			}
+			createUpdMsg("CHAR", this);
+			//log.write((new Date().getTime()).toString() + ',' + this.x + ',' + this.y + ',' + this.angle + ',' + ((this.pointTo == null) ? ("") : (this.pointAngle)) + '\n');
+		}
+
 		this.onstage = function() {
 
 			var maxx = -1 * (193 - 2312) / 2;
@@ -1808,8 +2371,8 @@ function startGame() {
 			var minx = -1 * (2313 - 2312) / 2;
 			var maxy = (2042 - 209) / 2;
 			//console.log("Comparing "+mychar.name+" at ("+mychar.x+","+mychar.y+") to ("+minx+"-"+maxx+","+miny+"-"+maxy+")");
-			if(this.x > minx && this.x < maxx) {
-				if(this.y > miny && this.y < maxy) {
+			if (this.x > minx && this.x < maxx) {
+				if (this.y > miny && this.y < maxy) {
 					//console.log("Char target is onstage "+this.name + ": ["+this.x+","+this.y+"]");
 					return true;
 				}
@@ -1817,142 +2380,29 @@ function startGame() {
 			//console.log("Char target is NOT onstage "+this.name + ": ["+this.x+","+this.y+"]");
 			return false;
 
-/*
-			if((x > -1 * (193 - 2312) / 2) && (x < -1 * (2313 - 2312) / 2) && (y > (209 - 209) / 2) && (y < (2042 - 209) / 2)) {
-				return true;
-			}
-			return false;*/
+			/*
+			 if((x > -1 * (193 - 2312) / 2) && (x < -1 * (2313 - 2312) / 2) && (y > (209 - 209) / 2) && (y < (2042 - 209) / 2)) {
+			 return true;
+			 }
+			 return false;*/
 		}
-		
-		this.fonstage = function() {
 
-			var maxx = -1 * (193 - 2312) / 2;
-			// to adjust for different dimensions for Unity vs JS
-			var miny = (209 - 209) / 2;
-			var minx = -1 * (2313 - 2312) / 2;
-			var maxy = (2042 - 209) / 2;
-			//console.log("Comparing "+mychar.name+" at ("+mychar.x+","+mychar.y+") to ("+minx+"-"+maxx+","+miny+"-"+maxy+")");
-			if (this.forcesMoveTo != null && (this.forcesMoveTo instanceof Character || this.forcesMoveTo instanceof Pawn)) {
-				if (this.forcesMoveTo instanceof Pawn) {
-					if(this.forcesMoveTo.x > minx && this.forcesMoveTo.x < maxx) {
-						if(this.forcesMoveTo.y > miny && this.forcesMoveTo.y < maxy) {
-							//console.log("Char target is onstage "+this.name + ": ["+this.x+","+this.y+"]");
-							return true;
-						}
-					}
-				} else {
-					if (this.forcesMoveTo.forcesMoveTo != null) {
-						if (this.forcesMoveTo.forcesMoveTo instanceof Pawn || this.forcesMoveTo.forcesMoveTo instanceof Character) {
-							if(this.forcesMoveTo.forcesMoveTo.x > minx && this.forcesMoveTo.forcesMoveTo.x < maxx) {
-								if(this.forcesMoveTo.forcesMoveTo.y > miny && this.forcesMoveTo.forcesMoveTo.y < maxy) {
-									//console.log("Char target is onstage "+this.name + ": ["+this.x+","+this.y+"]");
-									return true;
-								}
-							}
-						} else {
-							var temploc = this.forcesMoveTo.forcesMoveTo.split(" ");
-							temploc = temploc[1].split(",");
-							if(temploc[0] > minx && temploc[0] < maxx) {
-								if (temploc[1] > miny && temploc[1] < maxy) {
-									return true;
-								}
-							}
-						}
-					}
-				}
-			
-		} else if (this.forcesMoveTo != null) {
-			var temploc = this.forcesMoveTo.split(" ");
-			temploc = temploc[1].split(",");
-			if(temploc[0] > minx && temploc[0] < maxx) {
-				if (temploc[1] > miny && temploc[1] < maxy) {
-					return true;
-				}
-			}
-		} else {
-			if(this.x > minx && this.x < maxx) {
-				if(this.y > miny && this.y < maxy) {
-					//console.log("Char target is onstage "+this.name + ": ["+this.x+","+this.y+"]");
-					return true;
-				}
-			}
-		}
-			//console.log("Char target is NOT onstage "+this.name + ": ["+this.x+","+this.y+"]");
-			return false;
-
-/*
-			if((x > -1 * (193 - 2312) / 2) && (x < -1 * (2313 - 2312) / 2) && (y > (209 - 209) / 2) && (y < (2042 - 209) / 2)) {
-				return true;
-			}
-			return false;*/
-		}
-		
-		
-		this.inforces = function() {
-			if (forces.all == null) {
-				return false;
-			}
-			for (var i=0; i < forces.all.length; i++) {
-				if (forces.all[i].name == this.name) {
-					return true;
-				}
-			}
-			return false;
-		}
-		
-		this.update = function() {
-			// log current location & time to file
-			var temp = null;
-			//this.logfile.WriteLine((new Date().time).ToString()+"\t"+this.x+"\t"+this.y+"\t"+this.angle);
-
-			// check moveTo target to see if it moved & adjust
-			if(this.moveTo != null && (this.moveTo instanceof Character || this.moveTo instanceof Pawn)) {
-				// calc angle & save
-				temp = Math.atan2(this.y - this.moveTo.y, this.moveTo.x - this.x) + Math.PI / 2;
-				if(this.angle != temp) {
-					this.angleold = this.angle;
-					this.angle = temp;
-				}
-			} else if(this.moveTo != null && !(this.moveTo instanceof Character || this.moveTo instanceof Pawn)) {
-				// do nothing because moving to a specific point and need to look at the point, not the gaze for now
-			} else if(this.gazeTo != null && (this.gazeTo instanceof Character || this.gazeTo instanceof Pawn) && !this.turning) {// check gaze target to see if it moved & adjust
-				// calc angle & save
-				temp = Math.atan2(this.y - this.gazeTo.y, this.gazeTo.x - this.x) + Math.PI / 2;
-				if(this.angle != temp) {
-					this.angleold = this.angle;
-					this.angle = temp;
-				}
-			}
-
-			// check point target to see if it moved & adjust
-			if(this.pointTo != null && (this.pointTo instanceof Character || this.pointTo instanceof Pawn)) {
-				// calc angle & save
-				temp = Math.atan2(this.y - this.pointTo.y, this.pointTo.x - this.x) + Math.PI / 2;
-				if(this.pointAngle != temp) {
-					this.pointAngleold = this.pointAngle;
-					this.pointAngle = temp;
-				}
-			}
-			createUpdMsg("CHAR", this);
-			log.write((new Date().getTime()).toString() + ',' + this.x + ',' + this.y + ',' + this.angle + ',' + ((this.pointTo == null) ? ("") : (this.pointAngle)) + '\n');
-		}
-		
-
-		
-		this.Step = function(msgnum, targetx, targety, targetAngle, callbackFunc, othercallback) {
+		this.Step = function(msgnum, targetx, targety, targetAngle, callbackFunc) {
+			//console.log("In Step, msgnum=" + msgnum + " for " + this.name);
 			// check if target moved on us first
 			var temp = null;
-			if(this.moveTo instanceof Character || this.moveTo instanceof Pawn) {
+			if (this.moveTo instanceof Character || this.moveTo instanceof Pawn) {
+				//console.log("Step "+msgnum+" moveto instanceof object");
 				temp = Math.atan2(this.y - this.moveTo.y, this.moveTo.x - this.x) + Math.PI / 2;
 				//Math.atan2(this.y - y, x - this.x) + Math.PI/2;
 				targetAngle = temp;
 				// look in direction moving
-				if(this.angle != temp) {
+				if (this.angle != temp) {
 					this.angleold = this.angle;
 					this.angle = targetAngle;
 				}
 				var distance = Math.sqrt(((this.x - this.moveTo.x) * (this.x - this.moveTo.x)) + ((this.y - this.moveTo.y) * (this.y - this.moveTo.y)));
-				if(this.moveTo instanceof Character) {
+				if (this.moveTo instanceof Character) {
 					// update target to within 44
 					distance = distance - (characterSize * 2);
 					targetx = this.x + (distance * Math.sin(targetAngle));
@@ -1964,42 +2414,40 @@ function startGame() {
 					targety = this.y + (distance * Math.cos(targetAngle));
 				}
 			}
-			if( targetx instanceof Array) {
+			if ( targetx instanceof Array) {
+				//console.log("Step "+msgnum+" target instanceof array");
 				//console.log("Moving array, current pt=("+this.x+","+this.y+"), target=("+targetx[0]+","+targety[0]+")");
-				if(this.x == targetx[0] && this.y == targety[0]) {// reached current destination
+				if (this.x == targetx[0] && this.y == targety[0]) {// reached current destination
+					//console.log("Step "+msgnum+" target instanceof array at destination");
 					targetx.splice(0, 1);
 					targety.splice(0, 1);
-					if(targetx.length == 0) {// no more destinations left
+					if (targetx.length == 0) {// no more destinations left
+						//console.log("Step "+msgnum+" moveto instanceof array at destination and no more destinations");
 						this.moveTo = null;
-						if (callbackFunc instanceof Array) {
-							for (var i=0; i< callbackFunc.length; i++) {
-								console.log("calling back from array");
-								callbackFunc[i](msgnum);
-							}
-						} else {
 						callbackFunc(msgnum);
-						}
 					} else {// more destinations left
+						//console.log("Step "+msgnum+" moveto instanceof array at destination and more destinations");
 						temp = Math.atan2(this.y - targety[0], targetx[0] - this.x) + Math.PI / 2;
 						targetAngle = temp;
-						if(this.angle != temp) {
+						if (this.angle != temp) {
 							this.angleold = this.angle;
 							this.angle = targetAngle;
 						}
 						this.moveTo = "Point " + targetx[0] + "," + targety[0];
 						//console.log("First Step, target=("+targetx[0]+","+targety[0]+")");
-						this.Step(msgnum, targetx, targety, targetAngle, callbackFunc, othercallback);
+						this.Step(msgnum, targetx, targety, targetAngle, callbackFunc);
 					}
 				} else {// haven't reached current destination yet
+					//console.log("Step "+msgnum+" moveto instanceof array NOT at destination");
 					// set value, then wait to repeat
-					if(Math.sin(targetAngle) < 0) {
+					if (Math.sin(targetAngle) < 0) {
 						this.xold = this.x;
 						this.x = Math.max(this.x + (moveDist * Math.sin(targetAngle)), targetx[0]);
 					} else {
 						this.xold = this.x;
 						this.x = Math.min(this.x + (moveDist * Math.sin(targetAngle)), targetx[0]);
 					}
-					if(Math.cos(targetAngle) < 0) {
+					if (Math.cos(targetAngle) < 0) {
 						this.yold = this.y;
 						this.y = Math.max(this.y + (moveDist * Math.cos(targetAngle)), targety[0]);
 					} else {
@@ -2012,9 +2460,9 @@ function startGame() {
 					var xtargety = targety;
 					var xtargetAngle = targetAngle;
 					var xcallbackFunc = callbackFunc;
-					var xothercallback = othercallback;
 					TIMEOUTS[TIMEOUTS.length] = setTimeout(function() {
-						xthis.Step(xmsgnum, xtargetx, xtargety, xtargetAngle, xcallbackFunc, xothercallback);
+						//console.log("Step "+xmsgnum+" in callback for moveto instanceof array NOT at destination");
+						xthis.Step(xmsgnum, xtargetx, xtargety, xtargetAngle, xcallbackFunc);
 						xthis = null;
 						xmsgnum = null;
 						xtargetx = null;
@@ -2024,30 +2472,24 @@ function startGame() {
 					}, stepTime);
 				}
 			} else {
-				if(this.x == targetx && this.y == targety) {
+				//console.log("Step "+msgnum+" moveto NOT instanceof array");
+				if (this.x == targetx && this.y == targety) {
+					//console.log("Step "+msgnum+" moveto NOT instanceof array and at destination "+callbackFunc.toString());
 					this.moveTo = null;
-					if (othercallback != null) {
-						callbackFunc(msgnum, othercallback);
-					} else {
-						if (callbackFunc instanceof Array) {
-							for (var i=0; i < callbackFunc.length; i++) {
-								callbackFunc[i](msgnum);
-								console.log("calling back from array2");
-							}
-						} else {
-							callbackFunc(msgnum);
-						}
-					}
+
+					callbackFunc(msgnum);
+
 				} else {
+					//console.log("Step "+msgnum+" moveto NOT instanceof array and NOT at destination");
 					// set value, then wait to repeat
-					if(Math.sin(targetAngle) < 0) {
+					if (Math.sin(targetAngle) < 0) {
 						this.xold = this.x;
 						this.x = Math.max(this.x + (moveDist * Math.sin(targetAngle)), targetx);
 					} else {
 						this.xold = this.x;
 						this.x = Math.min(this.x + (moveDist * Math.sin(targetAngle)), targetx);
 					}
-					if(Math.cos(targetAngle) < 0) {
+					if (Math.cos(targetAngle) < 0) {
 						this.yold = this.y;
 						this.y = Math.max(this.y + (moveDist * Math.cos(targetAngle)), targety);
 					} else {
@@ -2061,7 +2503,8 @@ function startGame() {
 					var xtargetAngle = targetAngle;
 					var xcallbackFunc = callbackFunc;
 					TIMEOUTS[TIMEOUTS.length] = setTimeout(function() {
-						xthis.Step(msgnum, targetx, targety, targetAngle, callbackFunc, othercallback);
+						//console.log("Step "+xmsgnum+" in callback for moveto NOT instanceof array and NOT at destination");
+						xthis.Step(xmsgnum, targetx, targety, targetAngle, callbackFunc);
 						xthis = null;
 						xmsgnum = null;
 						xtargetx = null;
@@ -2071,27 +2514,36 @@ function startGame() {
 					}, stepTime);
 				}
 			}
+			//console.log("Step "+msgnum+" exiting function");
 			createUpdMsg("CHAR", this);
 		}
 
-		this.locomotionPt = function(msgnum, x, y, callbackFunc, othercallback) {
+		this.locomotionPt = function(msgnum, x, y, callbackFunc) {
+			//console.log("In locomotion Pt " + msgnum + " for " + this.name);
 			// assume x & y are arrays so can go to multiple points in one call
-			console.log("locoPt starting msgnum "+msgnum+":"+x+","+y);
+			var targetAngle = 0;
 			if (this.moveTo != null) {
+				//console.log("locomotionPt "+msgnum+" moveto not null");
 				var xthis = this;
 				var xmsgnum = msgnum;
 				var xx = x;
 				var xy = y;
 				var xcallbackFunc = callbackFunc;
 				TIMEOUTS[TIMEOUTS.length] = setTimeout(function() {
-					//updAllChars(xthis, xmsgnum, null, xx, xy, xcallbackFunc);
-					xthis.locomotionPt(xmsgnum, xx, xy, xcallbackFunc); 
-					xthis = null; xmsgnum = null; xy = null; xx = null; xcallbackFunc = null;
+					xthis.locomotionPt(xmsgnum, xx, xy, xcallbackFunc);
+					xthis = null;
+					xmsgnum = null;
+					xy = null;
+					xx = null;
+					xcallbackFunc = null;
 				}, 65);
 			} else {
+				//console.log("locomotionPt "+msgnum+" else for moveto not null");
+
 				//console.log("Moving to ["+x+","+y+"]");
-				var targetAngle = 0;
-				if( x instanceof Array) {
+
+				if ( x instanceof Array) {
+					//console.log("locomotionPt "+msgnum+" else for moveto not null and instanceof array");
 					// array of values
 					/*for (var i = 0; i < x.length; i++) {
 					targetAngle = Math.atan2(this.y - y[i], x[i] - this.x) + Math.PI/2;
@@ -2101,20 +2553,21 @@ function startGame() {
 					}
 					}*/
 					// clean up point values:
-					for(var i = 0; i < x.length; i++) {
+					for (var i = 0; i < x.length; i++) {
 						x[i] = -1 * (x[i] - 2312) / 2;
 						y[i] = (y[i] - 209) / 2;
 					}
 					targetAngle = Math.atan2(this.y - y[0], x[0] - this.x) + Math.PI / 2;
-	
+
 					this.angleold = this.angle;
 					this.angle = targetAngle;
 					this.moveTo = "Point " + x[0] + "," + y[0];
 					//var xthis = this;
 					//	this.turnSome(msgnum, 'M', targetAngle, function() { xthis.Step(msgnum, x, y, targetAngle, callbackFunc); xthis = null;});
-	
-					this.Step(msgnum, x, y, targetAngle, callbackFunc, othercallback);
+
+					this.Step(msgnum, x, y, targetAngle, callbackFunc);
 				} else {
+					//console.log("locomotionPt "+msgnum+" else for moveto not null and NOT instanceof array");
 					x = -1 * (x - 2312) / 2;
 					// clean up point values
 					y = (y - 209) / 2;
@@ -2129,41 +2582,50 @@ function startGame() {
 					this.moveTo = "Point " + x + "," + y;
 					//var xthis = this;
 					//this.turnSome(msgnum, 'M', targetAngle, function() {xthis.Step(msgnum, x, y, targetAngle, callbackFunc); xthis = null;});
-	
-					this.Step(msgnum, x, y, targetAngle, callbackFunc, othercallback);
+
+					this.Step(msgnum, x, y, targetAngle, callbackFunc);
 				}
+				//console.log("locomotionPt "+msgnum+" moveto not null - create upd message");
 				createUpdMsg("CHAR", this);
 			}
+			//console.log("locomotionPt "+msgnum+" exiting function");
 		}
 
-		this.locomotionTarget = function(msgnum, item, callbackFunc, othercallback) {
-			console.log("locoTarget starting msgnum "+msgnum);
+		this.locomotionTarget = function(msgnum, item, callbackFunc) {
+			//console.log("In locomotionTarget " + msgnum);
+			var targetx = 0;
+			var targety = 0;
+			var targetAngle = 0;
+			var xthis = this;
 			if (this.moveTo != null) {
 				var xthis = this;
 				var xmsgnum = msgnum;
 				var xitem = item;
 				var xcallbackFunc = callbackFunc;
 				TIMEOUTS[TIMEOUTS.length] = setTimeout(function() {
-					//updAllChars(xthis, xmsgnum, xitem, null, null, xcallbackFunc);
-					xthis.locomotionTarget(xmsgnum, xitem, xcallbackFunc); 
-					xthis = null; xmsgnum = null; xitem = null; xcallbackFunc = null;
+					xthis.locomotionTarget(xmsgnum, xitem, xcallbackFunc);
+					xthis = null;
+					xmsgnum = null;
+					xitem = null;
+					xcallbackFunc = null;
 				}, 65);
 			} else {
+
 				// stop just before reaching target by 44 if item is person, by 10 if object
-				var targetAngle = 0;
+				targetAngle = 0;
 				var isCharacter = ( item instanceof Character);
 				targetAngle = Math.atan2(this.y - item.y, item.x - this.x) + Math.PI / 2;
 				//Math.atan2(this.y - y, x - this.x) + Math.PI/2;
 				this.moveTo = item;
-				var xthis = this;
+
 				//this.turnSome(msgnum, 'M', targetAngle, function() {
 				// look in direction moving
 				//this.angleold = this.angle;
 				//this.angle = targetAngle;
-				var targetx = 0;
-				var targety = 0;
+				targetx = 0;
+				targety = 0;
 				var distance = Math.sqrt(((xthis.x - item.x) * (xthis.x - item.x)) + ((xthis.y - item.y) * (xthis.y - item.y)));
-				if(isCharacter) {
+				if (isCharacter) {
 					// update target to within 44
 					distance = distance - (characterSize * 2);
 					targetx = xthis.x + (distance * Math.sin(targetAngle));
@@ -2175,9 +2637,9 @@ function startGame() {
 					targety = xthis.y + (distance * Math.cos(targetAngle));
 				}
 				// call the first step
-	
+
 				//this.gazeTo = null;
-				xthis.Step(msgnum, targetx, targety, targetAngle, callbackFunc, othercallback);
+				xthis.Step(msgnum, targetx, targety, targetAngle, callbackFunc);
 				xthis = null;
 				//});
 				createUpdMsg("CHAR", this);
@@ -2185,20 +2647,15 @@ function startGame() {
 		}
 
 		this.pickup = function(msgnum, item, callbackFunc) {
-			console.log("pickup starting msgnum "+msgnum);
-			if( item instanceof Pawn && item.moveable) {
+			//console.log("In pickup " + msgnum);
+			if ( item instanceof Pawn && item.moveable) {
 				this.item = item;
 				item.ownedby = this;
 			}
 			var xcallbackFunc = callbackFunc;
 			var xmsgnum = msgnum;
 			TIMEOUTS[TIMEOUTS.length] = setTimeout(function() {
-				if (xcallbackFunc instanceof Array) {
-							for (var i=0; i < xcallbackFunc.length; i++) {
-								xcallbackFunc[i](xmsgnum);
-								console.log("calling back from array pick up");
-							}
-						} else {xcallbackFunc(xmsgnum);}
+				xcallbackFunc(xmsgnum);
 				xcallbackFunc = null;
 				xmsgnum = null;
 			}, pickupTime);
@@ -2207,20 +2664,15 @@ function startGame() {
 		}
 
 		this.putdown = function(msgnum, item, callbackFunc) {
-			console.log("putdown starting msgnum "+msgnum);
-			if(this.item == item) {
+			//console.log("In putdown " + msgnum);
+			if (this.item == item) {
 				this.item = null;
 				item.ownedby = null;
 			}
 			var xcallbackFunc = callbackFunc;
 			var xmsgnum = msgnum;
 			TIMEOUTS[TIMEOUTS.length] = setTimeout(function() {
-				if (xcallbackFunc instanceof Array) {
-							for (var i=0; i < xcallbackFunc.length; i++) {
-								xcallbackFunc[i](xmsgnum);
-								console.log("calling back from array put down");
-							}
-						} else {xcallbackFunc(xmsgnum);}
+				xcallbackFunc(xmsgnum);
 				xcallbackFunc = null;
 				xmsgnum = null;
 			}, pickupTime);
@@ -2228,7 +2680,7 @@ function startGame() {
 		}
 
 		this.lookAtPt = function(msgnum, x, y, callbackFunc) {
-			console.log("lookPt starting msgnum "+msgnum);
+			//console.log("In lookAtPt " + msgnum);
 			if (this.turning) {
 				var xthis = this;
 				var xmsgnum = msgnum;
@@ -2236,7 +2688,12 @@ function startGame() {
 				var xy = y;
 				var xcallbackFunc = callbackFunc;
 				TIMEOUTS[TIMEOUTS.length] = setTimeout(function() {
-					xthis.lookAtPt(xmsgnum, xx, xy, xcallbackFunc); xthis = null; xmsgnum = null; xy = null; xx = null; xcallbackFunc = null;
+					xthis.lookAtPt(xmsgnum, xx, xy, xcallbackFunc);
+					xthis = null;
+					xmsgnum = null;
+					xy = null;
+					xx = null;
+					xcallbackFunc = null;
 				}, 65);
 			} else {
 				x = -1 * (x - 2312) / 2;
@@ -2248,7 +2705,7 @@ function startGame() {
 				//			this.angle = Math.atan2(this.y - y, x - this.x) + Math.PI/2;
 				this.gazeTo = "Point " + x + "," + y;
 				this.turning = true;
-				if(this.angle != targetAngle) {
+				if (this.angle != targetAngle) {
 					this.turnSome(msgnum, 'G', targetAngle, callbackFunc);
 				} else {
 					this.turning = false;
@@ -2256,13 +2713,9 @@ function startGame() {
 					var xcallbackFunc = callbackFunc;
 					var xmsgnum = msgnum;
 					TIMEOUTS[TIMEOUTS.length] = setTimeout(function() {
-						if (xcallbackFunc instanceof Array) {
-							for (var i=0; i < xcallbackFunc.length; i++) {
-								xcallbackFunc[i](xmsgnum);
-								console.log("calling back from array look pt");
-							}
-						} else {xcallbackFunc(xmsgnum); }
-						xcallbackFunc = null; xmsgnum = null;
+						xcallbackFunc(xmsgnum);
+						xcallbackFunc = null;
+						xmsgnum = null;
 					}, 100);
 				}
 				//			TIMEOUTS[TIMEOUTS.length] = setTimeout(function(){callbackFunc(msgnum)},lookatTime);
@@ -2276,8 +2729,8 @@ function startGame() {
 			// check if target moved & update targetAngle based on that
 			var temp;
 			//var targetAngle;
-			if(type == 'G') {
-				if(this.gazeTo instanceof Character || this.gazeTo instanceof Pawn) {
+			if (type == 'G') {
+				if (this.gazeTo instanceof Character || this.gazeTo instanceof Pawn) {
 					targetAngle = Math.atan2(this.y - this.gazeTo.y, this.gazeTo.x - this.x) + Math.PI / 2;
 					//Math.atan2(this.y - y, x - this.x) + Math.PI/2;
 					//console.log("char gaze: target angle updated to "+targetAngle);
@@ -2285,41 +2738,29 @@ function startGame() {
 				}
 			}
 			// convert targetAngle to a positive value
-			if(targetAngle > Math.PI * 2) {
+			if (targetAngle > Math.PI * 2) {
 				targetAngle = targetAngle - Math.PI * 2;
 				//console.log("bigger: target angle to:"+targetAngle);
-			} else if(targetAngle < 0) {
+			} else if (targetAngle < 0) {
 				targetAngle = targetAngle + Math.PI * 2;
 				//console.log("smaller: target angle to:"+targetAngle);
 			}
-			if(this.angle == targetAngle) {
+			if (this.angle == targetAngle) {
 				// done - stop moving!
 				//console.log("Done looking");
 				this.turning = false;
-				if (callbackFunc instanceof Array) {
-							for (var i=0; i < callbackFunc.length; i++) {
-								callbackFunc[i](msgnum);
-								console.log("calling back from array turnsome1");
-							}
-						} else {
-				callbackFunc(msgnum);}
+				callbackFunc(msgnum);
 			} else {
-				if(Math.abs(targetAngle - this.angle) <= turnDist) {
+				if (Math.abs(targetAngle - this.angle) <= turnDist) {
 					temp = targetAngle;
 					this.angleold = this.angle;
 					this.angle = temp;
 					this.turning = false;
-					if (callbackFunc instanceof Array) {
-							for (var i=0; i < callbackFunc.length; i++) {
-								callbackFunc[i](msgnum);
-								console.log("calling back from array turn some");
-							}
-						} else {
-					callbackFunc(msgnum);}
+					callbackFunc(msgnum);
 					//console.log("less than turn dist, temp="+temp);
-				} else if(Math.abs(targetAngle - this.angle) > Math.PI) {
+				} else if (Math.abs(targetAngle - this.angle) > Math.PI) {
 					// turn right, so subtract, but check for hitting 0
-					if(this.angle > targetAngle) {
+					if (this.angle > targetAngle) {
 						temp = this.angle + turnDist;
 					} else {
 						temp = this.angle - turnDist;
@@ -2334,10 +2775,10 @@ function startGame() {
 					 } else if (this.angle < targetAngle && targetAngle < temp) {
 					 temp = targetAngle;
 					 }*/
-					if(temp < 0) {
+					if (temp < 0) {
 						this.angleold = this.angle;
 						this.angle = temp + Math.PI * 2;
-					} else if(temp > Math.PI * 2) {
+					} else if (temp > Math.PI * 2) {
 						this.angleold = this.angle;
 						this.angle = temp - Math.PI * 2;
 					} else {
@@ -2360,7 +2801,7 @@ function startGame() {
 					}, lookatTime);
 				} else {
 					// turn left, so add, but check for hitting 2PI
-					if(this.angle > targetAngle) {
+					if (this.angle > targetAngle) {
 						temp = this.angle - turnDist;
 					} else {
 						temp = this.angle + turnDist;
@@ -2375,10 +2816,10 @@ function startGame() {
 					 } else if (this.angle < targetAngle && targetAngle < temp) {
 					 temp = targetAngle;
 					 }*/
-					if(temp > Math.PI * 2) {
+					if (temp > Math.PI * 2) {
 						this.angleold = this.angle;
 						this.angle = temp - Math.PI * 2;
-					} else if(temp < 0) {
+					} else if (temp < 0) {
 						this.angleold = this.angle;
 						this.angle = temp + Math.PI * 2;
 					} else {
@@ -2407,7 +2848,7 @@ function startGame() {
 		}
 
 		this.lookAtTarget = function(msgnum, item, callbackFunc) {
-			console.log("lookTarget starting msgnum "+msgnum);
+			//console.log("In lookAtTarget " + msgnum);
 			//console.log("looking by "+this.name);
 			if (this.turning) {
 				var xthis = this;
@@ -2415,7 +2856,11 @@ function startGame() {
 				var xitem = item;
 				var xcallbackFunc = callbackFunc;
 				TIMEOUTS[TIMEOUTS.length] = setTimeout(function() {
-					xthis.lookAtTarget(xmsgnum, xitem, xcallbackFunc); xthis = null; xmsgnum = null; xitem = null; xcallbackFunc = null;
+					xthis.lookAtTarget(xmsgnum, xitem, xcallbackFunc);
+					xthis = null;
+					xmsgnum = null;
+					xitem = null;
+					xcallbackFunc = null;
 				}, 65);
 			} else {
 				var targetAngle = Math.atan2(this.y - item.y, item.x - this.x) + Math.PI / 2;
@@ -2423,7 +2868,7 @@ function startGame() {
 				//			this.angleold = this.angle;
 				//			this.angle = Math.atan2(this.y - item.y, item.x - this.x) + Math.PI/2;
 				this.gazeTo = item;
-				if(this.angle != targetAngle) {
+				if (this.angle != targetAngle) {
 					this.turnSome(msgnum, 'G', targetAngle, callbackFunc);
 				} else {
 					//console.log("already looking, cancelling");
@@ -2432,12 +2877,7 @@ function startGame() {
 					var xcallbackFunc = callbackFunc;
 					var xmsgnum = msgnum;
 					TIMEOUTS[TIMEOUTS.length] = setTimeout(function() {
-						if (xcallbackFunc instanceof Array) {
-							for (var i=0; i < xcallbackFunc.length; i++) {
-								xcallbackFunc[i](xmsgnum);
-								console.log("calling back from array look target");
-							}
-						} else {xcallbackFunc(xmsgnum);}
+						xcallbackFunc(xmsgnum);
 						xcallbackFunc = null;
 						xmsgnum = null;
 					}, 100);
@@ -2456,7 +2896,7 @@ function startGame() {
 		}
 
 		this.pointAtPoint = function(msgnum, x, y, callbackFunc) {
-			console.log("pointPt starting msgnum "+msgnum);
+			//console.log("In pointAtPoint " + msgnum);
 			if (this.pointTo != null) {
 				var xthis = this;
 				var xmsgnum = msgnum;
@@ -2464,7 +2904,12 @@ function startGame() {
 				var xy = y;
 				var xcallbackFunc = callbackFunc;
 				TIMEOUTS[TIMEOUTS.length] = setTimeout(function() {
-					xthis.pointAtPoint(xmsgnum, xx, xy, xcallbackFunc); xthis = null; xmsgnum = null; xx = null; xy=null; xcallbackFunc = null;
+					xthis.pointAtPoint(xmsgnum, xx, xy, xcallbackFunc);
+					xthis = null;
+					xmsgnum = null;
+					xx = null;
+					xy = null;
+					xcallbackFunc = null;
 				}, 65);
 			} else {
 				// find the angle to the point & save as this.pointAngle
@@ -2485,27 +2930,27 @@ function startGame() {
 				var xcallbackFunc = callbackFunc;
 				var xmsgnum = msgnum;
 				TIMEOUTS[TIMEOUTS.length] = setTimeout(function() {
-					if (xcallbackFunc instanceof Array) {
-							for (var i=0; i < xcallbackFunc.length; i++) {
-								xcallbackFunc[i](xmsgnum);
-								console.log("calling back from array point point");
-							}
-						} else {xcallbackFunc(xmsgnum); }
-					xcallbackFunc = null; xmsgnum = null;
+					xcallbackFunc(xmsgnum);
+					xcallbackFunc = null;
+					xmsgnum = null;
 				}, pointTime);
 				createUpdMsg("CHAR", this);
 			}
 		}
 
 		this.pointAtTarget = function(msgnum, item, callbackFunc) {
-			console.log("pointTarget starting msgnum "+msgnum);
+			//console.log("In pointAtTarget " + msgnum);
 			if (this.pointTo != null) {
 				var xthis = this;
 				var xmsgnum = msgnum;
 				var xitem = item;
 				var xcallbackFunc = callbackFunc;
 				TIMEOUTS[TIMEOUTS.length] = setTimeout(function() {
-					xthis.pointAtTarget(xmsgnum, xitem, xcallbackFunc); xthis = null; xmsgnum = null; xitem = null; xcallbackFunc = null;
+					xthis.pointAtTarget(xmsgnum, xitem, xcallbackFunc);
+					xthis = null;
+					xmsgnum = null;
+					xitem = null;
+					xcallbackFunc = null;
 				}, 65);
 			} else {
 				// find the angle to the item & save as this.pointAngle
@@ -2522,13 +2967,9 @@ function startGame() {
 				var xcallbackFunc = callbackFunc;
 				var xmsgnum = msgnum;
 				TIMEOUTS[TIMEOUTS.length] = setTimeout(function() {
-					if (xcallbackFunc instanceof Array) {
-							for (var i=0; i < xcallbackFunc.length; i++) {
-								xcallbackFunc[i](xmsgnum);
-								console.log("calling back from array point target");
-							}
-						} else {xcallbackFunc(xmsgnum); }
-					xcallbackFunc = null; xmsgnum = null;
+					xcallbackFunc(xmsgnum);
+					xcallbackFunc = null;
+					xmsgnum = null;
 				}, pointTime);
 				createUpdMsg("CHAR", this);
 			}
@@ -2546,19 +2987,12 @@ function startGame() {
 			var xthis = this;
 			var mytime = 0;
 			//console.log(textarray);
-			if(textarray.length == 0) {
+			if (textarray.length == 0) {
 				//TIMEOUTS[TIMEOUTS.length] = setTimeout(function() {
 
 				this.stopSpeaking();
 				//xthis = null;
-				if (callbackFunc instanceof Array) {
-							for (var i=0; i < callbackFunc.length; i++) {
-								callbackFunc[i](msgnum);
-								console.log("calling back from array sayone");
-							}
-						} else {
 				callbackFunc(msgnum);
-				}
 				//}, 100);
 			} else {
 				mytime = textarray[0].length;
@@ -2582,7 +3016,11 @@ function startGame() {
 
 		}
 		this.say = function(msgnum, text, callbackFunc) {
-			console.log("say starting msgnum "+msgnum);
+			console.log("In say:" + msgnum + "-" + text);
+			/*var stack = traceback();
+			 for (var i = 0; i < stack.length; i++) {
+			 console.log("In function " + stack[i].name + " on line " + stack[i].line);
+			 }*/
 			var splittext = splitLine(text);
 			//console.log(splittext);
 			this.sayone(msgnum, splittext, callbackFunc);
@@ -2618,50 +3056,50 @@ function startGame() {
 		this.showcolorold = this.showcolor;
 		this.ownedby = null;
 		this.moveable = moveable;
-		if(pawns == null) {
+		if (pawns == null) {
 			pawns = new Array();
 			pawns[0] = this;
 		} else {
 			pawns[pawns.length] = this;
 		}
-		if(allObjects == null) {
+		if (allObjects == null) {
 			allObjects = new Array();
 			allObjects[0] = this;
 		} else {
 			allObjects[allObjects.length] = this;
 		}
-		if(this.moveable) {
-			var dp = new Date();
+		if (this.moveable) {
+			/*var dp = new Date();
 			var filenamep = "PAWN-" + (dp.getMonth() + 1 ) + "." + dp.getDate() + "." + dp.getFullYear() + " " + dp.getHours() + "." + dp.getMinutes() + "." + dp.getSeconds();
 			var logp = fs.createWriteStream('logs/' + this.name + '-' + filenamep + '.csv', {
-				'flags' : 'a'
-			});
-			logp.write('time,x,y,owner\n');
+			'flags' : 'a'
+			});*/
+			//logp.write('time,x,y,owner\n');
 		}
 
 		this.update = function() {
-			if(this.moveable) {
-				if(this.ownedby != null) {
+			if (this.moveable) {
+				if (this.ownedby != null) {
 					this.xold = this.x;
 					this.x = this.ownedby.x - characterSize - objectSize;
 					this.yold = this.y;
 					this.y = this.ownedby.y;
-					if(this.showcolor != this.color) {
+					if (this.showcolor != this.color) {
 						this.showcolorold = this.showcolor;
 					}
 					this.showcolor = this.color;
-				} else if(this.showcolor != this.neg) {
+				} else if (this.showcolor != this.neg) {
 					this.showcolorold = this.showcolor;
 					this.showcolor = this.neg;
 				}
 				createUpdMsg("PAWN", this);
-				logp.write((new Date().getTime()).toString() + ',' + this.x + ',' + this.y + ',' + ((this.showcolor == this.neg) ? ("") : (this.ownedby.name)) + '\n');
+				//logp.write((new Date().getTime()).toString() + ',' + this.x + ',' + this.y + ',' + ((this.showcolor == this.neg) ? ("") : (this.ownedby.name)) + '\n');
 			}
 		}
 	}// end of Object object
 
 	function worldUpdate() {
-		for(var i = 0; i < allObjects.length; i++) {
+		for (var i = 0; i < allObjects.length; i++) {
 			allObjects[i].update();
 		}
 	}
@@ -2674,13 +3112,13 @@ function startGame() {
 		var stringarray = [];
 		//var b = '';
 		var s = st;
-		while(s.length > n) {
+		while (s.length > n) {
 			var c = s.substring(0, n);
 			var d = c.lastIndexOf(' ');
 			var e = c.lastIndexOf('\n');
 			//if (e != -1)
 			//d = e;
-			if(d == -1)
+			if (d == -1)
 				d = n;
 			stringarray[stringarray.length] = c.substring(0, d);
 			s = s.substring(d + 1);
@@ -2721,10 +3159,10 @@ function startGame() {
 	var hamlet = new Character('HAMLET', 1147, 100, 0, '0,205,0', '0,100,0');
 	var horatio = new Character('HORATIO', 1253, 100, 0, '233,150,122', '139,69,0');
 
-for (var i = 0; i < allObjects.length; i++) {
-	//console.log("Position of "+allObjects[i].name+" = ["+allObjects[i].x+","+allObjects[i].y+"]");
-}
-//var nobody = new Character('NOBODY', 935, 1020, Math.PI*3/2, '255,255,255', '0,0,0');
+	for (var i = 0; i < allObjects.length; i++) {
+		console.log("Position of " + allObjects[i].name + " = [" + allObjects[i].x + "," + allObjects[i].y + "]");
+	}
+	//var nobody = new Character('NOBODY', 935, 1020, Math.PI*3/2, '255,255,255', '0,0,0');
 
 	INTERVAL_ID = setInterval(worldUpdate, framerate);
 
@@ -2732,14 +3170,14 @@ for (var i = 0; i < allObjects.length; i++) {
 	// this is to initialize client to the same as server immediately
 	var msg = "";
 	var mynames = ["SHOVEL", "SKULL1", "SKULL2", "LANTERN", "HAMLET", "HORATIO", "GRAVEDIGGER1", "GRAVEDIGGER2"];
-	for(var i = 0; i < allObjects.length; i++) {
+	for (var i = 0; i < allObjects.length; i++) {
 
-		if(allObjects[i] instanceof Character) {
+		if (allObjects[i] instanceof Character) {
 			msg = "CHAR" + "\t" + allObjects[i].name + "\t" + allObjects[i].x + "\t" + allObjects[i].y + "\t" + allObjects[i].angle + "\t" + ((allObjects[i].pointTo == null) ? ("null") : ((allObjects[i] instanceof Pawn) ? (allObjects[i].name) : (allObjects[i]))) + "\t" + allObjects[i].pointAngle;
 		} else {
 			msg = "PAWN" + "\t" + allObjects[i].name + "\t" + allObjects[i].x + "\t" + allObjects[i].y + "\t" + allObjects[i].showcolor;
 		}
-		if(mynames.indexOf(allObjects[i].name) != -1) {
+		if (mynames.indexOf(allObjects[i].name) != -1) {
 			server.sendMsg(msg);
 		}
 	}
@@ -2782,189 +3220,7 @@ for (var i = 0; i < allObjects.length; i++) {
 	 });
 	 }); */
 
-
-	function updAllChars(curMover, msgnum, target, x, y, callbackFunc) {
-		// create all objects msgnum, x, y, callbackFunc
-		console.log("begin updAllChars");
-		//forces.printAll();
-		// updates the force characters and runs the forces stuff for onstage chars only
-		var myctr = 0;
-		for (var i = 0; i < characters.length; i++) {
-		//for (var i = characters.length - 1; i >=0; i--) {
-			console.log(characters[i]);
-			console.log(characters[i].fonstage());
-			console.log(characters[i].onstage());
-			console.log(characters[i].forcesMoveTo instanceof Character);
-			console.log((characters[i].forcesMoveTo instanceof Character?characters[i].forcesMoveTo.fonstage():"N/A"));
-			if (characters[i].fonstage() || (characters[i].onstage() && characters[i].forcesMoveTo == null) || (characters[i].forcesMoveTo instanceof Character && characters[i].forcesMoveTo.fonstage())) { // what if not moving??
-				characters[i].fchar = new forces.FCharacter(characters[i].name, characters[i].x, characters[i].y, charprecedence.indexOf(characters[i].name.toUpperCase()) + 1, characters[i].fonstage(), null);
-				//  null = links
-				//characters[i].fchartarget = null;
-				myctr++;
-				console.log(characters[i].name+" has a force");
-
-				//characters[i].fchar = new forces.FCharacter(characters[i].name, 10, 10, characters[i].rank, characters[i].onstage(), null);
-				if (characters[i].forcesMoveTo != null && (characters[i].forcesMoveTo instanceof Character || characters[i].forcesMoveTo instanceof Pawn)) {
-					if (characters[i].forcesMoveTo.fchar != null) {
-						characters[i].fchar.updpos(characters[i].forcesMoveTo.fchar.x, characters[i].forcesMoveTo.fchar.y);
-//						characters[i].fchar.x = characters[i].forcesMoveTo.fchar.x;
-//						characters[i].fchar.y = characters[i].forcesMoveTo.fchar.y;
-					} else {
-						characters[i].fchar.updpos(characters[i].forcesMoveTo.x, characters[i].forcesMoveTo.y);
-						//characters[i].fchar.x = characters[i].forcesMoveTo.x;
-						//characters[i].fchar.y = characters[i].forcesMoveTo.y;
-					}
-					characters[i].fchartarget = characters[i].forcesMoveTo;
-					characters[i].fchartargettime = 10;
-					// set how long to maintain this link for later
-				} else if (characters[i].forcesMoveTo != null) {
-					var temploc = characters[i].forcesMoveTo.split(" ");
-					temploc = temploc[1].split(",");
-					characters[i].fchar.updpos(temploc[0], temploc[1]);
-					//characters[i].fchar.x = temploc[0];
-					//characters[i].fchar.y = temploc[1];
-					characters[i].fchartarget = {
-						x : temploc[0],
-						y : temploc[1]
-					};
-					characters[i].fchartargettime = 10;
-					// set how long to maintain this link for later
-				} else {
-					characters[i].fchar.updpos(characters[i].x, characters[i].y);
-					//characters[i].fchar.x = characters[i].x;
-					//characters[i].fchar.y = characters[i].y;
-					characters[i].fchartargettime = characters[i].fchartargettime - 1;
-					if (characters[i].fchartargettime <= 0) {
-						characters[i].fchartarget = null;
-					}
-				}
-
-				if (characters[i].fchartarget != null) {
-					var unmoveable = null;
-					var mylink = null;
-					if (characters[i].fchartarget instanceof Pawn) {
-						unmoveable = new forces.Unmoveables(characters[i].fchartarget.name, characters[i].fchartarget.x, characters[i].fchartarget.y, null);
-						mylink = new forces.Link('target', characters[i].name, unmoveable.name, Math.random(), Math.random());
-					} else if ((characters[i].fchartarget instanceof Character)) {
-						// is a character, so no new link needed
-					} else {
-						unmoveable = new forces.Unmoveables("Point" + (Math.random() * 1000), characters[i].fchartarget.x, characters[i].fchartarget.y, null);
-						mylink = new forces.Link('target', characters[i].name, unmoveable.name, Math.random(), Math.random());
-					} //else {
-						// is a character, so no new link needed
-					//}
-				}
-			} else {
-				
-						characters[i].fchar = null;
-						if (characters[i].forcesMoveTo != null) {
-							if (characters[i].forcesMoveTo instanceof Character || characters[i].forcesMoveTo instanceof Pawn) {
-								// do nothing
-							} else {
-								var temploc = characters[i].forcesMoveTo.split(" ");
-								
-								temploc = temploc[1].split(",");
-								characters[i].forcesMoveTo = "Point "+temploc[0]+","+temploc[1];//{x:temploc[0], y:temploc[1]};
-							}
-						}
-					
-			}
-		}
-
-		console.log("ready to recalculate");
-		if (myctr > 0) {
-			forces.printAll();
-			forces.recalculate();
-		}
-		moveAllChars(msgnum, callbackFunc);
-		if (myctr > 0) {
-			console.log("done calculating and sending messages");
-			forces.printAll();
-		}
-	}
-
-
-var FWAITINGON = new Array();
-var FWAITING = false;
-var forcectr = 0;
-
-
-function moveAllChars(msgnum, callbackFunc) {
-	// once done running forces, move all characters based on its output
-	forcectr = 0;
-	FWAITING = true;
-	for (var i=0; i < characters.length; i++) {
-		//if (characters[i].onstage()) {
-			// if has a force character -- all should have this??
-			if (characters[i].fchar != null) {
-				if (characters[i].fchar.x != characters[i].x || characters[i].fchar.y != characters[i].y) {
-					FWAITINGON[FWAITINGON.length] = forcectr+"-"+msgnum;
-					if (characters[i].nextStep.length != 0) {
-						console.log("moving character with a next step "+characters[i].name+":"+characters[i].fchar.x+","+characters[i].fchar.y);
-						console.log(characters[i].nextStep);
-						characters[i].locomotionPt(forcectr+"-"+msgnum, characters[i].fchar.x, characters[i].fchar.y, characters[i].nextStep);
-					} else {
-						console.log("moving character with no next step "+characters[i].name+":"+characters[i].fchar.x+","+characters[i].fchar.y);
-						characters[i].locomotionPt(forcectr+"-"+msgnum, characters[i].fchar.x, characters[i].fchar.y, readyForNextMsgForces);
-					}
-					
-					forcectr++;
-					// clear out all my forces stuff!!
-					//characters[i].fchar.dodelete();
-					characters[i].fchar = null;
-					if (characters[i].forcetarget != null) {
-						//characters[i].forcetarget.dodelete();
-						characters[i].forcetarget = null;
-					}
-					characters[i].fchar = null;
-					characters[i].forcesMoveTo = null;
-					//characters[i].nextStep = null;
-				}
-			} else {
-				// character moving offstage - need to let them leave
-				if (characters[i].forcesMoveTo != null) {
-					//console.log(characters[i].forcesMoveTo);
-					console.log("moving character offstage "+characters[i].name+":"+characters[i].forcesMoveTo.x+","+characters[i].forcesMoveTo.y);
-					FWAITINGON[FWAITINGON.length] = forcectr+"-"+msgnum;
-					if (characters[i].forcesMoveTo instanceof Character || characters[i].forcesMoveTo instanceof Pawn) {
-						characters[i].locomotionPt(forcectr+"-"+msgnum, characters[i].forcesMoveTo.x, characters[i].forcesMoveTo.y, readyForNextMsgForces);
-					} else {
-						var temploc = characters[i].forcesMoveTo.split(" ");
-								
-								temploc = temploc[1].split(","); 
-						characters[i].locomotionPt(forcectr+"-"+msgnum, temploc[0], temploc[1], readyForNextMsgForces);
-					}
-					//FWAITINGON[FWAITINGON.length] = forcectr+"-"+msgnum;
-					forcectr++;
-					characters[i].fchar = null;
-					characters[i].forcesMoveTo = null;
-					//characters[i].nextStep = null;
-					
-				}
-			}
-			if (characters[i].nextStep.length != 0 && characters[i].fchar == null) {
-				for (var n=0; n < characters[i].nextStep.length; n++) {
-				console.log("moving character with ONLY a next step "+characters[i].name);
-				FWAITINGON[FWAITINGON.length] = forcectr+"-"+msgnum;
-				characters[i].nextStep[n](forcectr+"-"+msgnum);
-				//FWAITINGON[FWAITINGON.length] = forcectr+"-"+msgnum;
-				forcectr++;
-				}
-			}
-			characters[i].nextStep = [];
-			
-		//}
-	}
-	// then remove linkages to the force characters
-	
-	// do callback to finish up: 
-	//callbackFunc(msgnum); 
 }
-
-}
-
-
-
 
 exports.startGame = startGame;
 exports.endSimulation = endSimulation;

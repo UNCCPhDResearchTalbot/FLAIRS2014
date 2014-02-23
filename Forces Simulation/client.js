@@ -1,13 +1,11 @@
 var characters = null;
 var legendgs = null;
-var cgs = null;
 var characterSize = 26;
 
 
+
 function startGame(gs) {
-	if (cgs == null) {
-			cgs = gs;
-		}
+
 
 	var textBoxes = null;
 	var speechBox = document.getElementById('text');
@@ -29,7 +27,6 @@ function startGame(gs) {
 	 */
 	function onMessage(e) {
 		// need to parse the message to update all people's values
-		//console.log(e);
 		var parsedMsg = e.split('\t');
 		switch (parsedMsg[0]) {
 			case "BOX":
@@ -42,7 +39,6 @@ function startGame(gs) {
 				var curChar = findItem('C', parsedMsg[1]);
 				curChar.x = parseFloat(parsedMsg[2]);
 				curChar.y = parseFloat(parsedMsg[3]);
-				//console.log("char upd="+parsedMsg[2]+","+parsedMsg[3]);
 				curChar.angle = parseFloat(parsedMsg[4]);
 				// need to figure out if point or object
 				var ptObj = parsedMsg[5];
@@ -61,88 +57,6 @@ function startGame(gs) {
 				break;
 			case "CONFIRMED":
 				// do nothing
-				break;
-			case "FORCES":
-				// update forces diagram
-				switch (parsedMsg[2]) {
-					case "CHAR":
-						if (parsedMsg[1] == "CREATE") {
-							fgsglob.addEntity(new FCharacter(parsedMsg[3], parsedMsg[4], parsedMsg[5], parsedMsg[6], true, null));
-							//console.log("fchar="+parsedMsg[4]+","+parsedMsg[5]);
-						} else if (parsedMsg[1] == "UPDATE") {
-							var curFChar = findFItem('C', parsedMsg[3]);
-							curFChar.x = parseFloat(parsedMsg[4]);
-							curFChar.y = parseFloat(parsedMsg[5]);
-							//console.log("updated fchar="+parsedMsg[4]+","+parsedMsg[5]);
-						} else { // this is "DELETE"
-							var curFChar = findFItem('C', parsedMsg[3]);
-							curFChar.dodelete();
-						}
-						break;
-					case "HUMAN":
-						if (parsedMsg[1] == "CREATE") {
-							fgsglob.addEntity(new Human(parsedMsg[3], parsedMsg[4], parsedMsg[5], parsedMsg[6], true, null));
-						} else if (parsedMsg[1] == "UPDATE") {
-							var curFHuman = findFItem('H', parsedMsg[3]);
-							curFHuman.x = parseFloat(parsedMsg[4]);
-							curFHuman.y = parseFloat(parsedMsg[5]);
-						} else { // this is "DELETE"
-							var curFHuman = findFItem('H', parsedMsg[3]);
-							curFHuman.dodelete();
-						}
-						break;
-					case "TARGET":
-						if (parsedMsg[1] == "CREATE") {
-							fgsglob.addEntity(new Unmoveables(parsedMsg[3], parsedMsg[4], parsedMsg[5], null));
-						} else if (parsedMsg[1] == "UPDATE") {
-							var curTarget = findFItem('T', parsedMsg[3]);
-							curTarget.x = parseFloat(parsedMsg[4]);
-							curTarget.y = parseFloat(parsedMsg[5]);
-						} else { // this is "DELETE"
-							var curTarget = findFItem('T', parsedMsg[3]);
-							curTarget.dodelete();
-						}
-						break;
-					case "LINK":
-						if (parsedMsg[1] == "CREATE") {
-							fgsglob.addEntity(new Link(parsedMsg[3], parsedMsg[4], parsedMsg[5], parsedMsg[6], parsedMsg[7]));
-						} else if (parsedMsg[1] == "UPDATE") {
-							var curLink = findFItem('L', parsedMsg[4], parsedMsg[5]);
-							curLink.attraction = parseFloat(parsedMsg[6]);
-							curLink.repel = parseFloat(parsedMsg[7]);
-						} else { // this is "DELETE"
-							var curLink = findFItem('L', parsedMsg[4], parsedMsg[5]);
-							curLink.dodelete();
-						}
-						break;
-					case "AUDIENCE":
-						if (parsedMsg[1] == "CREATE") {
-							fgsglob.addEntity(new Audience(parsedMsg[3], parsedMsg[4], parsedMsg[5]));
-						} else if (parsedMsg[1] == "UPDATE") {
-							var curAud = findFItem('A', parsedMsg[3]);
-							curAud.x = parseFloat(parsedMsg[4]);
-							curAud.y = parseFloat(parsedMsg[5]);
-						} else { // this is "DELETE"
-							var curAud = findFItem('A', parsedMsg[3]);
-							curAud.dodelete();
-						}
-						break;
-					case "CENTER":
-						if (parsedMsg[1] == "CREATE") {
-							fgsglob.addEntity(new Center(parsedMsg[3], parsedMsg[4]));
-						} else if (parsedMsg[1] == "UPDATE") {
-							var curCtr = findFItem('R');
-							curCtr.x = parseFloat(parsedMsg[3]);
-							curCtr.y = parseFloat(parsedMsg[4]);
-						} else { // this is "DELETE"
-							var curCtr = findFItem('R');
-							curCtr.dodelete();
-						}
-						break;
-					default:
-						console.log("ERROR - invalid force message:" + e);
-						break;
-				}
 				break;
 			default:
 				console.log("ERROR - invalid message:" + e);
@@ -238,9 +152,6 @@ function startGame(gs) {
 		//drawlegend(legendgs);
 
 		this.draw = function(c, gs) {
-			//console.log("in drawing");
-			c = document.getElementById('scanvas').getContext('2d');
-			gs = cgs;
 			c.fillStyle = this.fs;
 			c.beginPath();
 			c.arc(this.x, this.y, this.r, 0, Math.PI * 2, true);
@@ -269,8 +180,6 @@ function startGame(gs) {
 		
 		this.drawBubble = function(ctx)
 		{
-			ctx = document.getElementById('scanvas').getContext('2d');
-			gs = cgs;
 			var x = this.x;
 			var y = this.y-characterSize-70;
 			var w = 250;//6.5*(speechBox.innerHTML.length) +50;//200 * (speechBox.innerHTML.length/25);
@@ -350,8 +259,6 @@ function startGame(gs) {
 		}
 
 		this.draw = function(c, gs) {
-			c = document.getElementById('scanvas').getContext('2d');
-			gs = cgs;
 			c.fillStyle = 'rgba(' + this.showcolor + ', 1.0)';
 			c.beginPath();
 			c.arc(this.x, this.y, this.r, 0, Math.PI * 2, true);
@@ -376,21 +283,21 @@ function startGame(gs) {
 	//* Start of main code
 	//********************************************
 
-	cgs.addEntity(new SpeechBox());
+	gs.addEntity(new SpeechBox());
 	// create pawns
-	var shovel = cgs.addEntity(new Pawn('SHOVEL', 935 - 50, 100, '0, 0, 0', '234, 234, 234', 'S'));
-	var skull1 = cgs.addEntity(new Pawn('SKULL1', 1571 - 5, 914, '0, 0, 0', '234, 234, 234', 'X'));
-	var skull2 = cgs.addEntity(new Pawn('SKULL2', 1571 + 5, 914, '0, 0, 0', '234, 234, 234', 'X'));
-	var lantern = cgs.addEntity(new Pawn('LANTERN', 1041, 100, '0, 0, 0', '234, 234, 234', 'L'));
+	var shovel = gs.addEntity(new Pawn('SHOVEL', 935 - 50, 100, '0, 0, 0', '234, 234, 234', 'S'));
+	var skull1 = gs.addEntity(new Pawn('SKULL1', 1571 - 5, 914, '0, 0, 0', '234, 234, 234', 'X'));
+	var skull2 = gs.addEntity(new Pawn('SKULL2', 1571 + 5, 914, '0, 0, 0', '234, 234, 234', 'X'));
+	var lantern = gs.addEntity(new Pawn('LANTERN', 1041, 100, '0, 0, 0', '234, 234, 234', 'L'));
 	//var audience = gs.addEntity(new Pawn('AUDIENCE', 1253, 2641, '255,255,255', '255,255,255'));
 	//var centerbackstage = gs.addEntity(new Pawn('CENTERBACKSTAGE', 1000, 209, '255,255,255', '255,255,255'));
 	//var stageright = gs.addEntity(new Pawn('STAGERIGHT', 2313, 1250, '255,255,255', '255,255,255'));
 	// create characters
 		
-	var gravedigger2 = cgs.addEntity(new Character('GRAVEDIGGER2', 935, 100, 0, '171,130,255', '85,26,139'));
-	var horatio = cgs.addEntity(new Character('HORATIO', 1253, 100, 0, '233,150,122', '139,69,0'));
-	var hamlet = cgs.addEntity(new Character('HAMLET', 1147, 100, 0, '0,205,0', '0,100,0'));
-	var gravedigger1 = cgs.addEntity(new Character('GRAVEDIGGER1', 1041, 100, '100, 149, 237', '51,161,201'));// '135,206,250'));//, '0,0,128'
+	var gravedigger2 = gs.addEntity(new Character('GRAVEDIGGER2', 935, 100, 0, '171,130,255', '85,26,139'));
+	var horatio = gs.addEntity(new Character('HORATIO', 1253, 100, 0, '233,150,122', '139,69,0'));
+	var hamlet = gs.addEntity(new Character('HAMLET', 1147, 100, 0, '0,205,0', '0,100,0'));
+	var gravedigger1 = gs.addEntity(new Character('GRAVEDIGGER1', 1041, 100, '100, 149, 237', '51,161,201'));// '135,206,250'));//, '0,0,128'
 	
 	//var nobody = gs.addEntity(new Character('NOBODY', 935, 1020, 3*Math.PI/2, '255,255,255', '0,0,0'));
 	

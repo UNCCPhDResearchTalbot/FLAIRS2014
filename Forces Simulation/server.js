@@ -1,6 +1,6 @@
 /**
  * @fileoverview This file provides server socket listener for the game
- * @author Christine Talbot 
+ * @author Christine Talbot & Todd Dobbs
  */
 var io = require('socket.io').listen(8081);
 
